@@ -18,3 +18,38 @@ Diferencias técnicas de los archivos
 ¿Afecta al resultado final en Whisper?
 • Precisión: No hay una mejora en la transcripción si usas 44.1 kHz estéreo, ya que Whisper descarta la información estéreo y reduce la frecuencia a 16 kHz de todos modos.
 • Rendimiento y velocidad: Enviar el archivo original en estéreo de 44.1 kHz obliga a Whisper (o a tu sistema) a gastar recursos extra y tiempo haciendo la conversión interna. Convertir el archivo previamente a mono de 16 kHz acelera la carga y ahorra memoria o espacio de procesamiento
+## Requisitos
+
+- Debian 13 con X11.
+- GPU NVIDIA con driver compatible con CUDA 12 (probado con GTX 1060 6 GB y driver 550.163.01).
+- [Conda](https://docs.conda.io/) (miniconda o similar).
+
+## Instalación
+
+```bash
+conda env create -f environment.yml
+conda activate speechflow
+```
+
+El entorno incluye Python 3.12, `faster-whisper`, y cuBLAS y cuDNN (CUDA 12) desde conda-forge.
+
+Para comprobar que la GPU es visible:
+
+```bash
+python -c "import ctranslate2; print(ctranslate2.get_cuda_device_count())"  # debe imprimir 1
+```
+
+## Benchmark de STT
+
+1. Coloca archivos WAV de hasta 30 s (idealmente mono, 16 kHz) en `benchmarks/samples/`. Esa carpeta no se versiona.
+2. Ejecuta:
+
+   ```bash
+   python scripts/benchmark_stt.py
+   ```
+
+   Compara `small` y `medium` en `int8` sobre GPU, con las primeras 5 muestras y en español por defecto. Opciones: `--models`, `--language es|en`, `--max-samples N`, o rutas de WAV concretas.
+
+3. El resultado se guarda en `benchmarks/results.md`, con carga, latencia, VRAM pico y el modelo recomendado por defecto.
+
+La primera ejecución descarga los modelos desde Hugging Face (`medium` pesa ~1.5 GB), así que el tiempo de carga inicial no es representativo.
