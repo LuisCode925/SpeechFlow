@@ -9,3 +9,4 @@ dependencies:
   - pip
   - pip:
       - faster-whisper
+      - av<17
