@@ -10,7 +10,7 @@ La arquitectura Pascal (Compute Capability 6.1) de la Nvidia GTX 1060 6GB soport
 ```bash
 ffmpeg -i audio_original.wav -f segment -segment_time 10 -c copy segmento_%03d.wav
 ```
-## WAV Estéreo 44.1 kHz v.s Mono +16 kHz.
+## WAV Estéreo 44.1 kHz v.s Mono 16 kHz.
 Sí, existen diferencias técnicas importantes entre ambos archivos, pero OpenAI Whisper procesa y convierte internamente cualquier audio a mono de 16 kHz antes de realizar el reconocimiento de voz.
 Diferencias técnicas de los archivos
 • Estéreo a 44.1 kHz: Contiene dos canales de audio (izquierdo y derecho) y toma 44,100 muestras por segundo. Ocupa mucho más espacio de almacenamiento y ancho de banda porque almacena el doble de canales y una frecuencia mayor a la necesaria para la voz humana.
@@ -18,6 +18,7 @@ Diferencias técnicas de los archivos
 ¿Afecta al resultado final en Whisper?
 • Precisión: No hay una mejora en la transcripción si usas 44.1 kHz estéreo, ya que Whisper descarta la información estéreo y reduce la frecuencia a 16 kHz de todos modos.
 • Rendimiento y velocidad: Enviar el archivo original en estéreo de 44.1 kHz obliga a Whisper (o a tu sistema) a gastar recursos extra y tiempo haciendo la conversión interna. Convertir el archivo previamente a mono de 16 kHz acelera la carga y ahorra memoria o espacio de procesamiento
+
 ## Requisitos
 
 - Debian 13 con X11.
@@ -41,15 +42,22 @@ python -c "import ctranslate2; print(ctranslate2.get_cuda_device_count())"  # de
 
 ## Benchmark de STT
 
-1. Coloca archivos WAV de hasta 30 s (idealmente mono, 16 kHz) en `benchmarks/samples/`. Esa carpeta no se versiona.
+1. Coloca fragmentos WAV de hasta 30 s (idealmente mono, 16 kHz) en `benchmarks/samples/`, nombrados `<prefijo>_NNN.wav`. Esa carpeta no se versiona. El idioma de cada muestra se deduce del prefijo mediante `LANGUAGE_BY_PREFIX` en `scripts/benchmark_stt.py`:
+
+   | Prefijo | Idioma |
+   | ------- | ------ |
+   | `mercado-libre` | `es` |
+   | `bug-lower` | `en` |
+
+   Una familia de audios nueva exige añadir su prefijo al mapa. Los WAV de más de 30 s o sin un prefijo conocido se omiten (estos últimos con una advertencia en stderr).
 2. Ejecuta:
 
    ```bash
    python scripts/benchmark_stt.py
    ```
 
-   Compara `small` y `medium` en `int8` sobre GPU, con las primeras 5 muestras y en español por defecto. Opciones: `--models`, `--language es|en`, `--max-samples N`, o rutas de WAV concretas.
+   Compara `small` y `medium` en `int8` sobre GPU, usando todos los fragmentos válidos de `benchmarks/samples/` (sin límite de muestras), cada uno en su idioma. La corrida completa tarda varios minutos. Opciones: `--models`, `--compute-type`, `--max-samples N` (máximo de muestras **por idioma**, útil para una prueba corta) o rutas de WAV concretas.
 
-3. El resultado se guarda en `benchmarks/results.md`, con carga, latencia, VRAM pico y el modelo recomendado por defecto.
+3. El resultado se guarda en `benchmarks/results.md`, con la mediana por modelo e idioma (normalizada a 10 s de audio), el modelo recomendado por defecto, y la tabla con idioma, carga, latencia y VRAM pico de cada muestra.
 
 La primera ejecución descarga los modelos desde Hugging Face (`medium` pesa ~1.5 GB), así que el tiempo de carga inicial no es representativo.
