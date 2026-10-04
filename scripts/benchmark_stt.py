@@ -1,7 +1,8 @@
 """Benchmark de faster-whisper en GPU: carga de modelo, latencia y VRAM.
 
-Sin argumentos recorre `small` y `medium` en int8 sobre los primeros WAV de
-benchmarks/samples/ (de hasta 30 s) y escribe benchmarks/results.md.
+Sin argumentos recorre `small` y `medium` en int8 sobre todos los fragmentos
+`<prefijo>_NNN.wav` de benchmarks/samples/ (de hasta 30 s), con el idioma de cada
+prefijo, y escribe benchmarks/results.md.
 """
 import argparse
 import gc
@@ -113,17 +114,27 @@ def run_model(model_name, compute_type, samples):
     return rows
 
 
+def median_per_10s(rows):
+    return statistics.median(r["transcribe_seconds"] / r["audio_seconds"] * 10 for r in rows)
+
+
+def languages_of(rows):
+    return sorted({r["language"] for r in rows})
+
+
 def pick_default(rows, models):
-    """Prefiere el modelo más grande que cumpla latencia (por 10 s de audio) y VRAM."""
+    """Prefiere el modelo más grande que cumpla latencia (por 10 s de audio) y VRAM en cada idioma."""
     for model_name in reversed(models):
         mine = [r for r in rows if r["model"] == model_name]
-        per_10s = statistics.median(r["transcribe_seconds"] / r["audio_seconds"] * 10 for r in mine)
-        if per_10s < TARGET_SECONDS_PER_10S and max(r["vram_mb"] for r in mine) < VRAM_LIMIT_MB:
+        if all(
+            median_per_10s([r for r in mine if r["language"] == language]) < TARGET_SECONDS_PER_10S
+            for language in languages_of(mine)
+        ) and max(r["vram_mb"] for r in mine) < VRAM_LIMIT_MB:
             return model_name
     return None
 
 
-def write_results(rows, models, default, language):
+def write_results(rows, models, default):
     gpu = subprocess.check_output(
         ["nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"], text=True
     ).strip()
@@ -132,28 +143,38 @@ def write_results(rows, models, default, language):
         "",
         f"- Fecha: {date.today().isoformat()}",
         f"- GPU: {gpu}",
-        f"- Idioma fijado: `{language}` (sin muestras en inglés todavía)",
-        f"- Objetivo: < {TARGET_SECONDS_PER_10S:g} s por cada 10 s de audio, VRAM < {VRAM_LIMIT_MB} MB",
+        "- Idioma de cada muestra: por el prefijo de su nombre (`mercado-libre` → `es`, `bug-lower` → `en`)",
+        f"- Objetivo: < {TARGET_SECONDS_PER_10S:g} s por cada 10 s de audio en cada idioma, VRAM < {VRAM_LIMIT_MB} MB",
         "- `load_seconds` puede incluir la descarga del modelo en la primera ejecución.",
         "",
-        "| Modelo | Compute | Muestra | Audio (s) | Carga (s) | Transcripción (s) | VRAM pico (MB) |",
-        "| ------ | ------- | ------- | --------- | --------- | ----------------- | -------------- |",
+        "## Mediana por modelo e idioma (transcripción normalizada a 10 s de audio)",
+        "",
+    ]
+    for model_name in models:
+        mine = [r for r in rows if r["model"] == model_name]
+        for language in languages_of(mine):
+            lang_rows = [r for r in mine if r["language"] == language]
+            lines.append(
+                f"- `{model_name}` / `{language}`: {median_per_10s(lang_rows):.2f} s "
+                f"({len(lang_rows)} muestras), VRAM pico {max(r['vram_mb'] for r in lang_rows)} MB"
+            )
+    lines += ["", "## Modelo por defecto para la siguiente spec", ""]
+    if default:
+        lines.append(f"**`{default}` int8**: el modelo más grande que cumple latencia y VRAM en ambos idiomas.")
+    else:
+        lines.append("**Ninguno** cumple el objetivo de latencia y VRAM en todos los idiomas en esta GPU.")
+    lines += [
+        "",
+        "## Muestras",
+        "",
+        "| Modelo | Compute | Idioma | Muestra | Audio (s) | Carga (s) | Transcripción (s) | VRAM pico (MB) |",
+        "| ------ | ------- | ------ | ------- | --------- | --------- | ----------------- | -------------- |",
     ]
     for r in rows:
         lines.append(
-            f"| {r['model']} | {r['compute_type']} | {r['sample']} | {r['audio_seconds']:.1f} "
+            f"| {r['model']} | {r['compute_type']} | {r['language']} | {r['sample']} | {r['audio_seconds']:.1f} "
             f"| {r['load_seconds']:.2f} | {r['transcribe_seconds']:.2f} | {r['vram_mb']} |"
         )
-    lines += ["", "## Mediana por modelo (transcripción normalizada a 10 s de audio)", ""]
-    for model_name in models:
-        mine = [r for r in rows if r["model"] == model_name]
-        per_10s = statistics.median(r["transcribe_seconds"] / r["audio_seconds"] * 10 for r in mine)
-        lines.append(f"- `{model_name}`: {per_10s:.2f} s, VRAM pico {max(r['vram_mb'] for r in mine)} MB")
-    lines += ["", "## Modelo por defecto para la siguiente spec", ""]
-    if default:
-        lines.append(f"**`{default}` int8**: el modelo más grande que cumple latencia y VRAM.")
-    else:
-        lines.append("**Ninguno** cumple el objetivo de latencia en esta GPU.")
     lines += ["", "## Transcripciones", ""]
     for r in rows:
         lines.append(f"- `{r['model']}` / `{r['sample']}`: {r['text']}")
@@ -165,7 +186,6 @@ def main() -> int:
     parser.add_argument("wav", nargs="*", type=Path, help="audios (por defecto benchmarks/samples/*.wav)")
     parser.add_argument("--models", nargs="+", default=["small", "medium"])
     parser.add_argument("--compute-type", default="int8")
-    parser.add_argument("--language", default="es", help="es | en")
     parser.add_argument("--max-samples", type=int, default=None, help="máximo de muestras por idioma")
     args = parser.parse_args()
 
@@ -184,7 +204,7 @@ def main() -> int:
         rows += run_model(model_name, args.compute_type, samples)
 
     default = pick_default(rows, args.models)
-    write_results(rows, args.models, default, args.language)
+    write_results(rows, args.models, default)
     print(f"Resultados en {RESULTS_PATH} (modelo por defecto: {default or 'ninguno'})")
     return 0
 
