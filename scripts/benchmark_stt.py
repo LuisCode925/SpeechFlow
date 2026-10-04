@@ -66,14 +66,18 @@ def load_samples(paths, limit):
     if not paths:
         paths = sorted(SAMPLES_DIR.glob("*.wav"))
     samples = []
+    per_language = {}
     for path in paths:
         if not path.is_file():
             continue
         audio = decode_audio(str(path), sampling_rate=SAMPLE_RATE)
-        if len(audio) / SAMPLE_RATE <= MAX_SAMPLE_SECONDS:
-            samples.append((path.name, audio))
-        if len(samples) == limit:
-            break
+        if len(audio) / SAMPLE_RATE > MAX_SAMPLE_SECONDS:
+            continue
+        language = language_for(path)
+        if language is None or per_language.get(language, 0) == limit:
+            continue
+        per_language[language] = per_language.get(language, 0) + 1
+        samples.append((path.name, audio, language))
     return samples
 
 
@@ -161,7 +165,7 @@ def main() -> int:
     parser.add_argument("--models", nargs="+", default=["small", "medium"])
     parser.add_argument("--compute-type", default="int8")
     parser.add_argument("--language", default="es", help="es | en")
-    parser.add_argument("--max-samples", type=int, default=5)
+    parser.add_argument("--max-samples", type=int, default=None, help="máximo de muestras por idioma")
     args = parser.parse_args()
 
     samples = load_samples(args.wav, args.max_samples)
