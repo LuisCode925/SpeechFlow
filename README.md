@@ -62,6 +62,33 @@ python -c "import ctranslate2; print(ctranslate2.get_cuda_device_count())"  # de
 
 La primera ejecución descarga los modelos desde Hugging Face (`medium` pesa ~1.5 GB), así que el tiempo de carga inicial no es representativo.
 
+## Módulo de transcripción
+
+`src/speechflow/transcriber.py` define `Transcriber`, que carga `faster-whisper` una sola vez (GPU, `int8`), hace un calentamiento y transcribe cuantas veces se quiera sin recargar el modelo.
+
+```python
+import sys
+import wave
+
+import numpy as np
+
+sys.path.insert(0, "src")
+from speechflow.transcriber import Transcriber
+
+transcriber = Transcriber("medium", "es")  # carga y calienta el modelo una vez
+
+with wave.open("benchmarks/captures/capture.wav", "rb") as wav:
+    audio = np.frombuffer(wav.readframes(wav.getnframes()), dtype=np.int16)
+
+text, seconds = transcriber.transcribe(audio)
+print(f"{seconds:.2f} s: {text}")
+```
+
+- **Entrada:** `numpy.ndarray` `int16`, mono, a 16 kHz. El módulo no valida la tasa: un audio a otra tasa da transcripciones erróneas sin aviso.
+- **Salida:** `(texto, segundos)`. Los segundos no incluyen la carga del modelo ni el calentamiento. Un array vacío devuelve `("", 0.0)` sin invocar al modelo.
+- **Parámetros:** modelo (defecto `medium`) e idioma (defecto `es`, fijo, sin detección automática).
+- `scripts/capture_mic.py` usa este módulo.
+
 ## Captura del micrófono
 
 `scripts/capture_mic.py` es una prueba de la cadena micrófono → WAV → texto: graba entre dos pulsaciones de Enter, guarda `benchmarks/captures/capture.wav` (no versionado), muestra duración, pico y RMS, y transcribe el audio con `faster-whisper` (`int8`, GPU).

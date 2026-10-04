@@ -1,6 +1,6 @@
 # SPEC 04 — Módulo de transcripción reutilizable
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 02, SPEC 03
 > **Fecha:** 2026-10-04
 > **Objetivo:** Extraer la transcripción de `scripts/capture_mic.py` a un módulo reutilizable `src/speechflow/transcriber.py` que carga el modelo una sola vez y transcribe audio mono 16 kHz `int16`.
