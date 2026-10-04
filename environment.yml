@@ -6,6 +6,8 @@ dependencies:
   - cuda-version=12.4
   - libcublas
   - cudnn=9
+  - portaudio
+  - python-sounddevice
   - pip
   - pip:
       - faster-whisper
