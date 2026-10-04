@@ -3,6 +3,9 @@ channels:
   - conda-forge
 dependencies:
   - python=3.12
+  - cuda-version=12.4
+  - libcublas
+  - cudnn=9
   - pip
   - pip:
       - faster-whisper
