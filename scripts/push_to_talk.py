@@ -9,6 +9,7 @@ import os
 import shutil
 import sys
 import threading
+from enum import Enum
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -16,12 +17,58 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 import sounddevice as sd
 from pynput import keyboard
 
-from speechflow.audio import PREFERRED_DEVICE, default_device, list_devices, parse_device
-from speechflow.transcriber import COMPUTE_TYPE, DEFAULT_LANGUAGE, DEFAULT_MODEL, Transcriber
+from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, list_devices, parse_device
+from speechflow.notifier import notify
+from speechflow.transcriber import COMPUTE_TYPE, DEFAULT_LANGUAGE, DEFAULT_MODEL, SAMPLE_RATE, Transcriber
 
 DEFAULT_KEY = "ctrl_r"  # nombre de pynput.keyboard.Key, o un carácter suelto
 MIN_SECONDS = 0.5  # por debajo no se transcribe ni se escribe nada
 MAX_SECONDS = 60.0  # la grabación se corta sola
+
+
+class State(Enum):
+    IDLE = "idle"
+    RECORDING = "recording"
+    TRANSCRIBING = "transcribing"
+
+
+class PushToTalk:
+    """Ciclo de la tecla global: pulsar graba, soltar para. Los callbacks corren en el hilo del listener."""
+
+    def __init__(self, key: keyboard.Key | keyboard.KeyCode, device: int | str | None) -> None:
+        self.key = key
+        self.recorder = Recorder(device)
+        self.state = State.IDLE
+        self._held = False  # la tecla sigue pulsada; filtra las repeticiones automáticas
+        self._lock = threading.Lock()
+
+    def on_press(self, key) -> None:
+        if key != self.key:
+            return
+        with self._lock:
+            was_held, self._held = self._held, True
+            if was_held or self.state is not State.IDLE:
+                return
+            try:
+                self.recorder.start()
+            except (sd.PortAudioError, ValueError) as error:
+                print(f"Error al abrir el micrófono: {error}", file=sys.stderr)
+                notify("SpeechFlow", f"Error al abrir el micrófono: {error}")
+                return
+            self.state = State.RECORDING
+        print("Grabando...")
+        notify("SpeechFlow", "Grabando...")
+
+    def on_release(self, key) -> None:
+        if key != self.key:
+            return
+        with self._lock:
+            self._held = False
+            if self.state is not State.RECORDING:
+                return
+            audio = self.recorder.stop()
+            self.state = State.IDLE
+        print(f"Grabación terminada: {len(audio) / SAMPLE_RATE:.2f} s")
 
 
 def parse_key(name: str) -> keyboard.Key | keyboard.KeyCode:
@@ -69,8 +116,10 @@ def main() -> None:
     transcriber = Transcriber(args.model, args.language)
     print(f"Listo. Mantén pulsada la tecla {args.key!r} para dictar. Ctrl+C para salir.")
 
+    push_to_talk = PushToTalk(key, device)
     try:
-        threading.Event().wait()
+        with keyboard.Listener(on_press=push_to_talk.on_press, on_release=push_to_talk.on_release) as listener:
+            listener.join()
     except KeyboardInterrupt:
         print("\nSaliendo.")
 
