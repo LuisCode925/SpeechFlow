@@ -81,7 +81,7 @@ def load_samples(paths, limit):
     return samples
 
 
-def run_model(model_name, compute_type, samples, language):
+def run_model(model_name, compute_type, samples):
     baseline_mb = vram_used_mb()
     rows = []
     with VramPeak() as vram:
@@ -90,15 +90,16 @@ def run_model(model_name, compute_type, samples, language):
         load_seconds = time.perf_counter() - t0
 
         # Calentamiento: la primera inferencia en CUDA es más lenta y no se mide.
-        list(model.transcribe(samples[0][1], language=language)[0])
+        list(model.transcribe(samples[0][1], language=samples[0][2])[0])
 
-        for name, audio in samples:
+        for name, audio, language in samples:
             t0 = time.perf_counter()
             segments, _info = model.transcribe(audio, language=language)
             text = " ".join(s.text.strip() for s in segments)
             rows.append({
                 "model": model_name,
                 "compute_type": compute_type,
+                "language": language,
                 "sample": name,
                 "audio_seconds": len(audio) / SAMPLE_RATE,
                 "load_seconds": load_seconds,
@@ -180,7 +181,7 @@ def main() -> int:
     rows = []
     for model_name in args.models:
         print(f"Probando {model_name} {args.compute_type} con {len(samples)} muestras...")
-        rows += run_model(model_name, args.compute_type, samples, args.language)
+        rows += run_model(model_name, args.compute_type, samples)
 
     default = pick_default(rows, args.models)
     write_results(rows, args.models, default, args.language)
