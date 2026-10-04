@@ -1,19 +1,25 @@
 """Prueba de captura del micrófono: graba entre dos Enter y guarda un WAV mono 16 kHz.
 
+Tras grabar, mide el audio y lo transcribe con faster-whisper (int8, GPU).
 `--list-devices` muestra los dispositivos de entrada disponibles.
 """
 import argparse
 import sys
+import time
 import wave
 from pathlib import Path
 
 import numpy as np
 import sounddevice as sd
 from math import gcd
+from faster_whisper import WhisperModel
 from scipy.signal import resample_poly
 
 SAMPLE_RATE = 16000  # Hz, nativo de Whisper; el WAV final siempre sale a esta tasa
 PREFERRED_DEVICE = "Realtek"
+DEFAULT_MODEL = "medium"
+DEFAULT_LANGUAGE = "es"
+COMPUTE_TYPE = "int8"
 MIN_PEAK = 0.01  # por debajo se avisa de un posible micrófono mudo o equivocado
 CHANNELS = 1
 DTYPE = "int16"
@@ -78,6 +84,17 @@ def measure(audio: np.ndarray) -> tuple[float, float, float]:
     return len(audio) / SAMPLE_RATE, float(np.abs(samples).max()), float(np.sqrt(np.mean(samples**2)))
 
 
+def transcribe(audio: np.ndarray, model_name: str, language: str) -> tuple[str, float]:
+    """Transcribe int16 mono a SAMPLE_RATE; devuelve (texto, segundos), sin contar la carga del modelo."""
+    model = WhisperModel(model_name, device="cuda", compute_type=COMPUTE_TYPE)
+    samples = audio.reshape(-1).astype(np.float32) / 32768
+    list(model.transcribe(np.zeros(SAMPLE_RATE, dtype=np.float32), language=language)[0])  # calentamiento
+    start = time.perf_counter()
+    segments, _info = model.transcribe(samples, language=language)
+    text = " ".join(segment.text.strip() for segment in segments)
+    return text, time.perf_counter() - start
+
+
 def save_wav(path: Path, audio: np.ndarray) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(path), "wb") as wav:
@@ -91,6 +108,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list-devices", action="store_true", help="lista los dispositivos de entrada y termina")
     parser.add_argument("--device", type=parse_device, help=f"índice o nombre del dispositivo de entrada (defecto: el que contenga '{PREFERRED_DEVICE}', si no el del sistema)")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help="modelo de faster-whisper (defecto: %(default)s)")
+    parser.add_argument("--language", default=DEFAULT_LANGUAGE, help="idioma de la transcripción (defecto: %(default)s)")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="WAV de salida (defecto: %(default)s)")
     args = parser.parse_args()
 
@@ -112,6 +131,11 @@ def main() -> None:
             f"Aviso: pico {peak:.4f} < {MIN_PEAK}; posible micrófono mudo o dispositivo equivocado (usa --list-devices).",
             file=sys.stderr,
         )
+    if len(audio) == 0:
+        return
+    print(f"Transcribiendo con {args.model} ({COMPUTE_TYPE}, GPU)...")
+    text, seconds = transcribe(audio, args.model, args.language)
+    print(f"Transcripción ({seconds:.2f} s): {text}")
 
 
 if __name__ == "__main__":
