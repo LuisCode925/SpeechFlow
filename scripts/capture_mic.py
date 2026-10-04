@@ -5,21 +5,19 @@ Tras grabar, mide el audio y lo transcribe con faster-whisper (int8, GPU).
 """
 import argparse
 import sys
-import time
 import wave
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import numpy as np
 import sounddevice as sd
 from math import gcd
-from faster_whisper import WhisperModel
 from scipy.signal import resample_poly
 
-SAMPLE_RATE = 16000  # Hz, nativo de Whisper; el WAV final siempre sale a esta tasa
+from speechflow.transcriber import COMPUTE_TYPE, DEFAULT_LANGUAGE, DEFAULT_MODEL, SAMPLE_RATE, Transcriber
+
 PREFERRED_DEVICE = "Realtek"
-DEFAULT_MODEL = "medium"
-DEFAULT_LANGUAGE = "es"
-COMPUTE_TYPE = "int8"
 MIN_PEAK = 0.01  # por debajo se avisa de un posible micrófono mudo o equivocado
 CHANNELS = 1
 DTYPE = "int16"
@@ -84,17 +82,6 @@ def measure(audio: np.ndarray) -> tuple[float, float, float]:
     return len(audio) / SAMPLE_RATE, float(np.abs(samples).max()), float(np.sqrt(np.mean(samples**2)))
 
 
-def transcribe(audio: np.ndarray, model_name: str, language: str) -> tuple[str, float]:
-    """Transcribe int16 mono a SAMPLE_RATE; devuelve (texto, segundos), sin contar la carga del modelo."""
-    model = WhisperModel(model_name, device="cuda", compute_type=COMPUTE_TYPE)
-    samples = audio.reshape(-1).astype(np.float32) / 32768
-    list(model.transcribe(np.zeros(SAMPLE_RATE, dtype=np.float32), language=language)[0])  # calentamiento
-    start = time.perf_counter()
-    segments, _info = model.transcribe(samples, language=language)
-    text = " ".join(segment.text.strip() for segment in segments)
-    return text, time.perf_counter() - start
-
-
 def save_wav(path: Path, audio: np.ndarray) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(path), "wb") as wav:
@@ -134,7 +121,8 @@ def main() -> None:
     if len(audio) == 0:
         return
     print(f"Transcribiendo con {args.model} ({COMPUTE_TYPE}, GPU)...")
-    text, seconds = transcribe(audio, args.model, args.language)
+    transcriber = Transcriber(args.model, args.language)
+    text, seconds = transcriber.transcribe(audio)
     print(f"Transcripción ({seconds:.2f} s): {text}")
 
 
