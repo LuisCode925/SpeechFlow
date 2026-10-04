@@ -13,3 +13,4 @@ dependencies:
   - pip:
       - faster-whisper
       - av<17
+      - pynput
