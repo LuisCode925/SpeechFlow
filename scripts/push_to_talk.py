@@ -18,6 +18,7 @@ import sounddevice as sd
 from pynput import keyboard
 
 from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, list_devices, parse_device
+from speechflow.inserter import insert_text
 from speechflow.notifier import notify
 from speechflow.transcriber import COMPUTE_TYPE, DEFAULT_LANGUAGE, DEFAULT_MODEL, SAMPLE_RATE, Transcriber
 
@@ -33,13 +34,15 @@ class State(Enum):
 
 
 class PushToTalk:
-    """Ciclo de la tecla global: pulsar graba, soltar para. Los callbacks corren en el hilo del listener."""
+    """Ciclo de la tecla global: pulsar graba, soltar transcribe e inserta. Los callbacks corren en el hilo del listener."""
 
-    def __init__(self, key: keyboard.Key | keyboard.KeyCode, device: int | str | None) -> None:
+    def __init__(self, key: keyboard.Key | keyboard.KeyCode, device: int | str | None, transcriber: Transcriber) -> None:
         self.key = key
         self.recorder = Recorder(device)
+        self.transcriber = transcriber
         self.state = State.IDLE
         self._held = False  # la tecla sigue pulsada; filtra las repeticiones automáticas
+        self._timer: threading.Timer | None = None
         self._lock = threading.Lock()
 
     def on_press(self, key) -> None:
@@ -56,6 +59,9 @@ class PushToTalk:
                 notify("SpeechFlow", f"Error al abrir el micrófono: {error}")
                 return
             self.state = State.RECORDING
+            self._timer = threading.Timer(MAX_SECONDS, self._stop_recording, args=(True,))
+            self._timer.daemon = True
+            self._timer.start()
         print("Grabando...")
         notify("SpeechFlow", "Grabando...")
 
@@ -64,11 +70,46 @@ class PushToTalk:
             return
         with self._lock:
             self._held = False
+        self._stop_recording(False)
+
+    def _stop_recording(self, timed_out: bool) -> None:
+        """Detiene la grabación (al soltar o por el temporizador); descarta lo corto o lanza la transcripción."""
+        with self._lock:
             if self.state is not State.RECORDING:
                 return
+            if self._timer is not None:
+                self._timer.cancel()
+                self._timer = None
             audio = self.recorder.stop()
-            self.state = State.IDLE
-        print(f"Grabación terminada: {len(audio) / SAMPLE_RATE:.2f} s")
+            seconds = len(audio) / SAMPLE_RATE
+            if seconds < MIN_SECONDS:
+                self.state = State.IDLE
+                print(f"Grabación de {seconds:.2f} s descartada (mínimo {MIN_SECONDS} s).")
+                return
+            self.state = State.TRANSCRIBING
+        if timed_out:
+            print(f"Límite de {MAX_SECONDS:.0f} s alcanzado; suelta la tecla y vuelve a pulsarla para otro dictado.")
+            notify("SpeechFlow", f"Límite de {MAX_SECONDS:.0f} s alcanzado")
+        print(f"Grabación terminada: {seconds:.2f} s. Transcribiendo...")
+        notify("SpeechFlow", "Transcribiendo...")
+        threading.Thread(target=self._transcribe_and_insert, args=(audio,), daemon=True).start()
+
+    def _transcribe_and_insert(self, audio) -> None:
+        try:
+            text, seconds = self.transcriber.transcribe(audio)
+            if not text:
+                print("Sin texto reconocido.")
+                notify("SpeechFlow", "Sin texto reconocido")
+                return
+            insert_text(text)
+            print(f"Insertado ({seconds:.2f} s): {text}")
+            notify("SpeechFlow", f"Texto insertado: {text}")
+        except Exception as error:
+            print(f"Error: {error}", file=sys.stderr)
+            notify("SpeechFlow", f"Error: {error}")
+        finally:
+            with self._lock:
+                self.state = State.IDLE
 
 
 def parse_key(name: str) -> keyboard.Key | keyboard.KeyCode:
@@ -116,7 +157,7 @@ def main() -> None:
     transcriber = Transcriber(args.model, args.language)
     print(f"Listo. Mantén pulsada la tecla {args.key!r} para dictar. Ctrl+C para salir.")
 
-    push_to_talk = PushToTalk(key, device)
+    push_to_talk = PushToTalk(key, device, transcriber)
     try:
         with keyboard.Listener(on_press=push_to_talk.on_press, on_release=push_to_talk.on_release) as listener:
             listener.join()
