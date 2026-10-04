@@ -14,6 +14,7 @@ from scipy.signal import resample_poly
 
 SAMPLE_RATE = 16000  # Hz, nativo de Whisper; el WAV final siempre sale a esta tasa
 PREFERRED_DEVICE = "Realtek"
+MIN_PEAK = 0.01  # por debajo se avisa de un posible micrófono mudo o equivocado
 CHANNELS = 1
 DTYPE = "int16"
 DEFAULT_OUTPUT = Path("benchmarks/captures/capture.wav")
@@ -69,6 +70,14 @@ def record(device: int | str | None) -> np.ndarray:
     return resample(audio, source_rate)
 
 
+def measure(audio: np.ndarray) -> tuple[float, float, float]:
+    """Duración (s), pico y RMS (0.0–1.0) del audio int16."""
+    if len(audio) == 0:
+        return 0.0, 0.0, 0.0
+    samples = audio.astype(np.float32) / 32768
+    return len(audio) / SAMPLE_RATE, float(np.abs(samples).max()), float(np.sqrt(np.mean(samples**2)))
+
+
 def save_wav(path: Path, audio: np.ndarray) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(path), "wb") as wav:
@@ -95,7 +104,14 @@ def main() -> None:
     except (sd.PortAudioError, ValueError) as error:
         sys.exit(f"Error con el dispositivo de entrada {device!r}: {error}")
     save_wav(args.output, audio)
-    print(f"Guardado {args.output} ({len(audio) / SAMPLE_RATE:.2f} s)")
+    print(f"Guardado {args.output}")
+    seconds, peak, rms = measure(audio)
+    print(f"Duración: {seconds:.2f} s | Pico: {peak:.3f} | RMS: {rms:.4f}")
+    if peak < MIN_PEAK:
+        print(
+            f"Aviso: pico {peak:.4f} < {MIN_PEAK}; posible micrófono mudo o dispositivo equivocado (usa --list-devices).",
+            file=sys.stderr,
+        )
 
 
 if __name__ == "__main__":
