@@ -22,6 +22,16 @@ RESULTS_PATH = Path("benchmarks/results.md")
 MAX_SAMPLE_SECONDS = 30
 TARGET_SECONDS_PER_10S = 2.0
 VRAM_LIMIT_MB = 6144
+LANGUAGE_BY_PREFIX = {"mercado-libre": "es", "bug-lower": "en"}
+
+
+def language_for(path: Path) -> str | None:
+    """Idioma de un fragmento `<prefijo>_NNN.wav`; None (con advertencia) si el prefijo no se conoce."""
+    prefix, sep, number = path.stem.rpartition("_")
+    language = LANGUAGE_BY_PREFIX.get(prefix) if sep and number.isdigit() else None
+    if language is None:
+        print(f"Advertencia: se omite {path.name} (prefijo de idioma desconocido).", file=sys.stderr)
+    return language
 
 
 def vram_used_mb() -> int:
