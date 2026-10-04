@@ -1,6 +1,6 @@
 # SPEC 01 — Stack tecnológico, esqueleto del proyecto y benchmark de STT
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** ninguna
 > **Fecha:** 2026-10-04
 > **Objetivo:** Fijar el stack tecnológico de SpeechFlow, crear el esqueleto del proyecto y verificar con un benchmark que Whisper corre en la GTX 1060 dentro del objetivo de latencia.
