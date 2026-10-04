@@ -1,6 +1,6 @@
 # SPEC 03 — Prueba de captura de audio del micrófono
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 01, SPEC 02
 > **Fecha:** 2026-10-04
 > **Objetivo:** Verificar con un script que `sounddevice` captura audio del micrófono en Debian 13, lo guarda como WAV mono 16 kHz y que `faster-whisper` lo transcribe.

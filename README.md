@@ -64,13 +64,34 @@ La primera ejecución descarga los modelos desde Hugging Face (`medium` pesa ~1.
 
 ## Captura del micrófono
 
-`scripts/capture_mic.py` es una prueba de captura: graba entre dos pulsaciones de Enter y guarda `benchmarks/captures/capture.wav` (no versionado).
+`scripts/capture_mic.py` es una prueba de la cadena micrófono → WAV → texto: graba entre dos pulsaciones de Enter, guarda `benchmarks/captures/capture.wav` (no versionado), muestra duración, pico y RMS, y transcribe el audio con `faster-whisper` (`int8`, GPU).
 
 ```bash
 python scripts/capture_mic.py --list-devices   # lista los dispositivos de entrada
-python scripts/capture_mic.py                  # graba con el dispositivo preferido
+python scripts/capture_mic.py                  # graba con el dispositivo preferido y transcribe
 python scripts/capture_mic.py --device 6       # índice o nombre de otro dispositivo
+python scripts/capture_mic.py --model small --language en
 ```
 
-- **Dispositivo:** sin `--device`, usa el primero cuyo nombre contenga "Realtek" (micrófono USB); si no hay, el del sistema.
+Flujo: Enter para empezar, hablar, Enter para parar. Salida de ejemplo:
+
+```
+Guardado benchmarks/captures/capture.wav
+Duración: 16.62 s | Pico: 0.116 | RMS: 0.0171
+Transcripción (1.26 s): Existe muchísima documentación sobre lenguajes ensamblador...
+```
+
+Opciones:
+
+| Opción | Descripción | Defecto |
+| ------ | ----------- | ------- |
+| `--list-devices` | Lista los dispositivos de entrada y termina (`>` marca el del sistema). | — |
+| `--device` | Índice o nombre del dispositivo de entrada. Falla con un mensaje claro si no existe. | primero que contenga "Realtek"; si no, el del sistema |
+| `--model` | Modelo de `faster-whisper`. | `medium` |
+| `--language` | Idioma de la transcripción. | `es` |
+| `--output` | Ruta del WAV de salida. | `benchmarks/captures/capture.wav` |
+
+- **Dispositivo:** sin `--device`, usa el primero cuyo nombre contenga "Realtek" (micrófono USB); si no hay, el del sistema. Si hay dudas sobre cuál se usa, ejecuta `--list-devices`.
 - **Remuestreo:** en este equipo los dispositivos `hw:` de ALSA rechazan 16 kHz (`Invalid sample rate`) y solo aceptan su tasa nativa (44 100 Hz). Por eso el script graba a esa tasa y remuestrea a 16 kHz con `scipy.signal.resample_poly`. El WAV final es mono, 16 kHz, 16 bits, el formato nativo de Whisper descrito arriba.
+- **Aviso de silencio:** si el pico es menor a 0.01 se avisa por stderr (posible micrófono mudo o equivocado). El ruido de fondo de un micrófono real puede superar ese umbral, así que el aviso solo detecta dispositivos casi mudos (p. ej. un `Loopback`).
+- **Latencia:** la transcripción se mide sin contar la carga del modelo (hay un calentamiento previo). Con `medium` int8 en la GTX 1060, ~16 s de audio tardaron 1.26 s. El modelo se carga después de grabar, así que hay una espera antes de ver el texto.
