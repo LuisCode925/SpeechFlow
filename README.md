@@ -32,7 +32,7 @@ conda env create -f environment.yml
 conda activate speechflow
 ```
 
-El entorno incluye Python 3.12, `faster-whisper`, y cuBLAS y cuDNN (CUDA 12) desde conda-forge.
+El entorno incluye Python 3.12, `faster-whisper`, `sounddevice` (con `portaudio`), `scipy`, y cuBLAS y cuDNN (CUDA 12) desde conda-forge.
 
 Para comprobar que la GPU es visible:
 
@@ -61,3 +61,16 @@ python -c "import ctranslate2; print(ctranslate2.get_cuda_device_count())"  # de
 3. El resultado se guarda en `benchmarks/results.md`, con la mediana por modelo e idioma (normalizada a 10 s de audio), el modelo recomendado por defecto, y la tabla con idioma, carga, latencia y VRAM pico de cada muestra.
 
 La primera ejecución descarga los modelos desde Hugging Face (`medium` pesa ~1.5 GB), así que el tiempo de carga inicial no es representativo.
+
+## Captura del micrófono
+
+`scripts/capture_mic.py` es una prueba de captura: graba entre dos pulsaciones de Enter y guarda `benchmarks/captures/capture.wav` (no versionado).
+
+```bash
+python scripts/capture_mic.py --list-devices   # lista los dispositivos de entrada
+python scripts/capture_mic.py                  # graba con el dispositivo preferido
+python scripts/capture_mic.py --device 6       # índice o nombre de otro dispositivo
+```
+
+- **Dispositivo:** sin `--device`, usa el primero cuyo nombre contenga "Realtek" (micrófono USB); si no hay, el del sistema.
+- **Remuestreo:** en este equipo los dispositivos `hw:` de ALSA rechazan 16 kHz (`Invalid sample rate`) y solo aceptan su tasa nativa (44 100 Hz). Por eso el script graba a esa tasa y remuestrea a 16 kHz con `scipy.signal.resample_poly`. El WAV final es mono, 16 kHz, 16 bits, el formato nativo de Whisper descrito arriba.
