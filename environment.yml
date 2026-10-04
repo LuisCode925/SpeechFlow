@@ -8,6 +8,7 @@ dependencies:
   - cudnn=9
   - portaudio
   - python-sounddevice
+  - scipy
   - pip
   - pip:
       - faster-whisper
