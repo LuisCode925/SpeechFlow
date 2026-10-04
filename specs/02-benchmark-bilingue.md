@@ -1,6 +1,6 @@
 # SPEC 02 — Benchmark de STT bilingüe (español e inglés)
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 01
 > **Fecha:** 2026-10-04
 > **Objetivo:** Volver a correr el benchmark de STT con las muestras en español e inglés, detectando el idioma de cada WAV por el prefijo de su nombre, para decidir el modelo por defecto con datos de ambos idiomas.
