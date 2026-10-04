@@ -1,6 +1,6 @@
 # SPEC 05 — Push-to-talk con atajo global
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 03, SPEC 04
 > **Fecha:** 2026-10-04
 > **Objetivo:** Dictar en cualquier aplicación de X11 manteniendo pulsada una tecla global (`Right Ctrl` por defecto): grabar mientras está pulsada, transcribir al soltar y escribir el texto en la ventana con foco.

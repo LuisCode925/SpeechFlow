@@ -24,6 +24,7 @@ Diferencias técnicas de los archivos
 - Debian 13 con X11.
 - GPU NVIDIA con driver compatible con CUDA 12 (probado con GTX 1060 6 GB y driver 550.163.01).
 - [Conda](https://docs.conda.io/) (miniconda o similar).
+- Para el push-to-talk, paquetes de sistema: `sudo apt install xdotool libnotify-bin` (`xdotool` es obligatorio; `libnotify-bin` aporta `notify-send` y es opcional).
 
 ## Instalación
 
@@ -32,7 +33,7 @@ conda env create -f environment.yml
 conda activate speechflow
 ```
 
-El entorno incluye Python 3.12, `faster-whisper`, `sounddevice` (con `portaudio`), `scipy`, y cuBLAS y cuDNN (CUDA 12) desde conda-forge.
+El entorno incluye Python 3.12, `faster-whisper`, `sounddevice` (con `portaudio`), `scipy`, `pynput`, y cuBLAS y cuDNN (CUDA 12) desde conda-forge.
 
 Para comprobar que la GPU es visible:
 
@@ -88,6 +89,52 @@ print(f"{seconds:.2f} s: {text}")
 - **Salida:** `(texto, segundos)`. Los segundos no incluyen la carga del modelo ni el calentamiento. Un array vacío devuelve `("", 0.0)` sin invocar al modelo.
 - **Parámetros:** modelo (defecto `medium`) e idioma (defecto `es`, fijo, sin detección automática).
 - `scripts/capture_mic.py` usa este módulo.
+
+## Módulos de captura, inserción y notificación
+
+- `src/speechflow/audio.py`: dispositivos de entrada, remuestreo, medición, guardado de WAV y `Recorder` (`start()` / `stop()`), que graba a la tasa nativa del dispositivo y devuelve `int16` mono a 16 kHz. Lo usan `capture_mic.py` y `push_to_talk.py`.
+- `src/speechflow/inserter.py`: `insert_text(text)` escribe el texto en la ventana con foco con `xdotool type --clearmodifiers`.
+- `src/speechflow/notifier.py`: `notify(title, body)` envía una notificación de escritorio con `notify-send`; si no está instalado, no hace nada.
+
+## Push-to-talk
+
+`scripts/push_to_talk.py` permite dictar en cualquier aplicación de X11: mantén pulsada una tecla global (`Right Ctrl` por defecto), habla, y al soltarla el texto se escribe en la ventana con foco. Se ejecuta en primer plano y termina con `Ctrl+C`.
+
+```bash
+python scripts/push_to_talk.py --list-devices   # lista los dispositivos de entrada
+python scripts/push_to_talk.py                  # Right Ctrl, modelo medium, español
+python scripts/push_to_talk.py --key f9         # otra tecla de disparo
+python scripts/push_to_talk.py --device 6 --model small --language en
+```
+
+Salida de ejemplo:
+
+```
+Cargando medium (int8, GPU)...
+Listo. Mantén pulsada la tecla 'ctrl_r' para dictar. Ctrl+C para salir.
+Grabando...
+Grabación terminada: 11.18 s. Transcribiendo...
+Insertado (1.03 s): El juego de la pelota prehispánico, que se practicaba a lo largo del territorio...
+```
+
+Opciones:
+
+| Opción | Descripción | Defecto |
+| ------ | ----------- | ------- |
+| `--list-devices` | Lista los dispositivos de entrada y termina (`>` marca el del sistema). | — |
+| `--device` | Índice o nombre del dispositivo de entrada. Falla con un mensaje claro si no existe. | primero que contenga "Realtek"; si no, el del sistema |
+| `--model` | Modelo de `faster-whisper`. | `medium` |
+| `--language` | Idioma de la transcripción. | `es` |
+| `--key` | Tecla de disparo: nombre de `pynput.keyboard.Key` (`ctrl_r`, `f9`, ...) o un carácter suelto. Falla con un mensaje claro si no existe. | `ctrl_r` |
+
+- **Modelo:** se carga una sola vez al arrancar, así que cada dictado responde rápido. Con `medium` int8 en la GTX 1060, ~11 s de audio tardaron 1.03 s.
+- **Grabaciones cortas:** las de menos de 0.5 s se descartan sin invocar al modelo (evita escribir texto basura por toques accidentales).
+- **Límite:** a los 60 s la grabación se corta sola, se transcribe lo grabado y se avisa. No empieza otra hasta soltar la tecla y volver a pulsarla.
+- **Durante la transcripción:** pulsar la tecla no inicia otra grabación.
+- **Avisos:** se muestran por consola y como notificación de escritorio (grabando, transcribiendo, texto insertado, error). Si falta `notify-send`, se avisa una vez y sigue funcionando solo con consola.
+- **Requisitos:** sesión X11 y `xdotool` instalado; si falta, el script sale al arrancar indicando `sudo apt install xdotool`.
+- **Foco:** el texto se escribe en la ventana que tenga el foco cuando termina la transcripción. Si cambias de ventana mientras se transcribe, se escribirá en la nueva.
+- **Una sola instancia:** no ejecutes dos a la vez; ambas reaccionarían a la misma tecla y competirían por el micrófono.
 
 ## Captura del micrófono
 
