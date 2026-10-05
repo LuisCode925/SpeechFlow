@@ -165,6 +165,8 @@ def main() -> None:
             listener.join()
     except KeyboardInterrupt:
         print("\nSaliendo.")
+        transcriber.close()
+        notify("SpeechFlow", "Modelo liberado")
 
 
 if __name__ == "__main__":
