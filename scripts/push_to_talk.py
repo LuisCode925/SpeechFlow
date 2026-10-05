@@ -26,6 +26,7 @@ from speechflow.notifier import notify
 from speechflow.transcriber import COMPUTE_TYPE, DEFAULT_LANGUAGE, DEFAULT_MODEL, SAMPLE_RATE, Transcriber
 
 DEFAULT_KEY = "ctrl_r"  # nombre de pynput.keyboard.Key, o un carácter suelto
+DEFAULT_SWITCH_KEY = "f8"  # tecla de cambio de entrada de audio, mismo formato
 MIN_SECONDS = 0.5  # por debajo no se transcribe ni se escribe nada
 MAX_SECONDS = 60.0  # la grabación se corta sola
 
@@ -41,13 +42,22 @@ class State(Enum):
 class PushToTalk:
     """Ciclo de la tecla global: pulsar graba, soltar transcribe e inserta. Los callbacks corren en el hilo del listener."""
 
-    def __init__(self, key: keyboard.Key | keyboard.KeyCode, device: int | str | None, transcriber: Transcriber, model_name: str) -> None:
+    def __init__(
+        self,
+        key: keyboard.Key | keyboard.KeyCode,
+        switch_key: keyboard.Key | keyboard.KeyCode,
+        device: int | str | None,
+        transcriber: Transcriber,
+        model_name: str,
+    ) -> None:
         self.key = key
+        self.switch_key = switch_key
         self.model_name = model_name
         self.recorder = Recorder(device)
         self.transcriber = transcriber
         self.state = State.IDLE
         self._held = False  # la tecla sigue pulsada; filtra las repeticiones automáticas
+        self._switch_held = False  # ídem para la tecla de cambio
         self._timer: threading.Timer | None = None
         self._lock = threading.Lock()
 
@@ -141,6 +151,7 @@ def main() -> None:
     parser.add_argument("--model", default=DEFAULT_MODEL, help="modelo de faster-whisper (defecto: %(default)s)")
     parser.add_argument("--language", default=DEFAULT_LANGUAGE, help="idioma de la transcripción (defecto: %(default)s)")
     parser.add_argument("--key", default=DEFAULT_KEY, help="tecla de disparo, nombre de pynput.keyboard.Key o un carácter (defecto: %(default)s)")
+    parser.add_argument("--switch-key", default=DEFAULT_SWITCH_KEY, help="tecla de cambio de entrada de audio, mismo formato que --key (defecto: %(default)s)")
     args = parser.parse_args()
 
     if args.list_devices:
@@ -162,6 +173,14 @@ def main() -> None:
     except ValueError as error:
         logger.error(f"Error con --key: {error}")
         sys.exit(1)
+    try:
+        switch_key = parse_key(args.switch_key)
+    except ValueError as error:
+        logger.error(f"Error con --switch-key: {error}")
+        sys.exit(1)
+    if switch_key == key:
+        logger.error(f"--switch-key y --key no pueden ser la misma tecla ({args.key!r}).")
+        sys.exit(1)
 
     device = args.device if args.device is not None else default_device()
     try:
@@ -179,9 +198,10 @@ def main() -> None:
     logger.info(f"Modelo: {args.model} | idioma: {args.language} | compute_type: {COMPUTE_TYPE} | GPU")
     logger.info(f"Modelo cargado en {load_seconds:.2f} s (incluye calentamiento)")
     logger.info(f"Dispositivo de audio: {describe_device(device)}")
+    logger.info(f"Cambio de entrada de audio: tecla {args.switch_key!r}.")
     logger.info(f"Listo. Mantén pulsada la tecla {args.key!r} para dictar. Ctrl+C para salir.")
 
-    push_to_talk = PushToTalk(key, device, transcriber, args.model)
+    push_to_talk = PushToTalk(key, switch_key, device, transcriber, args.model)
     try:
         with keyboard.Listener(on_press=push_to_talk.on_press, on_release=push_to_talk.on_release) as listener:
             listener.join()
