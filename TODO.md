@@ -53,3 +53,4 @@ Ideas recogidas de la sección "Lo que **no** está en esta spec" de las SPEC 01
 
 - [ ] Empaquetado (`pyproject.toml`) y `python -m speechflow` (SPEC 04, 05).
 - [ ] Tests con `pytest` (SPEC 04, 05).
+
