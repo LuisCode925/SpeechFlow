@@ -1,4 +1,7 @@
 """Configuración de usuario de push_to_talk: búsqueda, lectura y validación de un archivo TOML."""
+import json
+import logging
+import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +14,8 @@ EMERGENCY_FILENAME = "speechflow.emergency.toml"
 STATE_FILENAME = ".speechflow-state.toml"
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+logger = logging.getLogger("speechflow")
 
 
 @dataclass(frozen=True)
@@ -88,3 +93,64 @@ def load_config(path: Path) -> Config:
             f"recording.max_seconds ({config.max_seconds}) debe ser mayor que min_seconds ({config.min_seconds})"
         )
     return config
+
+
+def _emergency_template() -> str:
+    d = Config()
+    return (
+        "# speechflow.emergency.toml — plantilla con los valores por defecto.\n"
+        "# El script no la lee: cópiala o renómbrala a speechflow.toml para usarla.\n"
+        "[model]\n"
+        f"name = {json.dumps(d.model)}\n"
+        f"language = {json.dumps(d.language)}\n"
+        "\n"
+        "[keys]\n"
+        f"record = {json.dumps(d.key)}\n"
+        f"switch = {json.dumps(d.switch_key)}\n"
+        "\n"
+        "[audio]\n"
+        '# device = "Realtek"  # índice (entero) o parte del nombre; sin definir se usa la entrada por defecto\n'
+        "\n"
+        "[recording]\n"
+        f"min_seconds = {d.min_seconds}\n"
+        f"max_seconds = {d.max_seconds}\n"
+        "\n"
+        "[notifications]\n"
+        f"enabled = {str(d.notifications).lower()}\n"
+    )
+
+
+def write_emergency(directory: Path) -> Path:
+    """Crea EMERGENCY_FILENAME con los defectos en `directory`; si ya existe no lo toca. Devuelve la ruta."""
+    path = directory / EMERGENCY_FILENAME
+    try:
+        with path.open("x", encoding="utf-8") as f:
+            f.write(_emergency_template())
+    except FileExistsError:
+        pass
+    return path
+
+
+def load_state_device() -> str | None:
+    """Nombre del dispositivo guardado, o None si no hay archivo de estado o es ilegible."""
+    path = REPO_ROOT / STATE_FILENAME
+    try:
+        with path.open("rb") as f:
+            device = tomllib.load(f).get("device")
+    except FileNotFoundError:
+        return None
+    except (OSError, tomllib.TOMLDecodeError) as e:
+        logger.warning("Archivo de estado ilegible en %s: %s. Se ignora.", path, e)
+        return None
+    if device is not None and not isinstance(device, str):
+        logger.warning("Archivo de estado inválido en %s: device debe ser texto. Se ignora.", path)
+        return None
+    return device
+
+
+def save_state_device(name: str) -> None:
+    """Guarda el nombre del dispositivo en STATE_FILENAME (archivo temporal + os.replace)."""
+    path = REPO_ROOT / STATE_FILENAME
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(f"device = {json.dumps(name)}\n", encoding="utf-8")
+    os.replace(tmp, path)
