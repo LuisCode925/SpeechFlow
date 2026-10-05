@@ -60,6 +60,22 @@ def device_index(device: int | str | None) -> int | None:
     return index
 
 
+def device_name(device: int | str | None) -> str | None:
+    """Nombre de un dispositivo de entrada (entero, nombre o None = defecto); None si no se resuelve."""
+    try:
+        return sd.query_devices(device, "input")["name"]
+    except (sd.PortAudioError, ValueError):
+        return None
+
+
+def input_device_by_name(name: str) -> int | None:
+    """Índice del primer dispositivo de entrada cuyo nombre es exactamente `name`; None si no hay."""
+    for index in input_devices():
+        if sd.query_devices(index)["name"] == name:
+            return index
+    return None
+
+
 def next_input_device(current: int | str | None) -> int | None:
     """Siguiente dispositivo de entrada tras `current`, con vuelta al principio; None si no hay ninguno."""
     devices = input_devices()
@@ -104,6 +120,11 @@ class Recorder:
         self._stream: sd.InputStream | None = None
         self._source_rate = SAMPLE_RATE
 
+    @property
+    def active(self) -> bool:
+        """True si hay un InputStream abierto y activo."""
+        return self._stream is not None and self._stream.active
+
     def start(self) -> None:
         """Abre el InputStream a la tasa nativa del dispositivo y empieza a acumular."""
         self._chunks = []
@@ -120,10 +141,13 @@ class Recorder:
         self._stream.start()
 
     def stop(self) -> np.ndarray:
-        """Cierra el stream y devuelve int16 mono a SAMPLE_RATE."""
+        """Cierra el stream y devuelve int16 mono a SAMPLE_RATE; tolera un stream caído."""
         if self._stream is not None:
-            self._stream.stop()
-            self._stream.close()
+            try:
+                self._stream.stop()
+                self._stream.close()
+            except sd.PortAudioError:
+                pass
             self._stream = None
         audio = np.concatenate(self._chunks) if self._chunks else np.zeros((0, CHANNELS), dtype=DTYPE)
         self._chunks = []
