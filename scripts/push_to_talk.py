@@ -5,6 +5,7 @@ resultado en la ventana con foco. Termina con Ctrl+C. `--list-devices` muestra l
 dispositivos de entrada disponibles.
 """
 import argparse
+import logging
 import os
 import shutil
 import sys
@@ -20,13 +21,15 @@ from pynput import keyboard
 
 from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, list_devices, parse_device
 from speechflow.inserter import insert_text
-from speechflow.log import setup_logging
+from speechflow.log import LOGGER_NAME, setup_logging
 from speechflow.notifier import notify
 from speechflow.transcriber import COMPUTE_TYPE, DEFAULT_LANGUAGE, DEFAULT_MODEL, SAMPLE_RATE, Transcriber
 
 DEFAULT_KEY = "ctrl_r"  # nombre de pynput.keyboard.Key, o un carácter suelto
 MIN_SECONDS = 0.5  # por debajo no se transcribe ni se escribe nada
 MAX_SECONDS = 60.0  # la grabación se corta sola
+
+logger = logging.getLogger(LOGGER_NAME)
 
 
 class State(Enum):
@@ -38,8 +41,9 @@ class State(Enum):
 class PushToTalk:
     """Ciclo de la tecla global: pulsar graba, soltar transcribe e inserta. Los callbacks corren en el hilo del listener."""
 
-    def __init__(self, key: keyboard.Key | keyboard.KeyCode, device: int | str | None, transcriber: Transcriber) -> None:
+    def __init__(self, key: keyboard.Key | keyboard.KeyCode, device: int | str | None, transcriber: Transcriber, model_name: str) -> None:
         self.key = key
+        self.model_name = model_name
         self.recorder = Recorder(device)
         self.transcriber = transcriber
         self.state = State.IDLE
@@ -57,14 +61,14 @@ class PushToTalk:
             try:
                 self.recorder.start()
             except (sd.PortAudioError, ValueError) as error:
-                print(f"Error al abrir el micrófono: {error}", file=sys.stderr)
+                logger.error(f"Error al abrir el micrófono: {error}")
                 notify("SpeechFlow", f"Error al abrir el micrófono: {error}")
                 return
             self.state = State.RECORDING
             self._timer = threading.Timer(MAX_SECONDS, self._stop_recording, args=(True,))
             self._timer.daemon = True
             self._timer.start()
-        print("Grabando...")
+        logger.info("Grabando...")
 
     def on_release(self, key) -> None:
         if key != self.key:
@@ -85,24 +89,26 @@ class PushToTalk:
             seconds = len(audio) / SAMPLE_RATE
             if seconds < MIN_SECONDS:
                 self.state = State.IDLE
-                print(f"Grabación de {seconds:.2f} s descartada (mínimo {MIN_SECONDS} s).")
+                logger.info(f"Grabación de {seconds:.2f} s descartada (mínimo {MIN_SECONDS} s).")
                 return
             self.state = State.TRANSCRIBING
         if timed_out:
-            print(f"Límite de {MAX_SECONDS:.0f} s alcanzado; suelta la tecla y vuelve a pulsarla para otro dictado.")
-        print(f"Grabación terminada: {seconds:.2f} s. Transcribiendo...")
+            logger.warning(f"Límite de {MAX_SECONDS:.0f} s alcanzado; suelta la tecla y vuelve a pulsarla para otro dictado.")
+        logger.info(f"Grabación terminada: {seconds:.2f} s. Transcribiendo con {self.model_name}/{self.transcriber.language}...")
         threading.Thread(target=self._transcribe_and_insert, args=(audio,), daemon=True).start()
 
     def _transcribe_and_insert(self, audio) -> None:
         try:
             text, seconds = self.transcriber.transcribe(audio)
+            label = f"{self.model_name}/{self.transcriber.language}"
             if not text:
-                print("Sin texto reconocido.")
+                logger.info(f"Sin texto reconocido ({seconds:.2f} s, {label}).")
                 return
             insert_text(text)
-            print(f"Insertado ({seconds:.2f} s): {text}")
+            realtime = seconds / (len(audio) / SAMPLE_RATE)
+            logger.info(f"Insertado ({seconds:.2f} s, {realtime:.2f}x tiempo real, {len(text)} caracteres, {label}): {text}")
         except Exception as error:
-            print(f"Error: {error}", file=sys.stderr)
+            logger.error(f"Error: {error}")
             notify("SpeechFlow", f"Error: {error}")
         finally:
             with self._lock:
@@ -143,7 +149,7 @@ def main() -> None:
         list_devices()
         return
 
-    logger = setup_logging()
+    setup_logging()
 
     if shutil.which("xdotool") is None:
         logger.error("Falta xdotool. Instálalo con: sudo apt install xdotool")
@@ -177,7 +183,7 @@ def main() -> None:
     logger.info(f"Dispositivo de audio: {describe_device(device)}")
     logger.info(f"Listo. Mantén pulsada la tecla {args.key!r} para dictar. Ctrl+C para salir.")
 
-    push_to_talk = PushToTalk(key, device, transcriber)
+    push_to_talk = PushToTalk(key, device, transcriber, args.model)
     try:
         with keyboard.Listener(on_press=push_to_talk.on_press, on_release=push_to_talk.on_release) as listener:
             listener.join()
