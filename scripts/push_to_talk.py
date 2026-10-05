@@ -19,6 +19,7 @@ from pynput import keyboard
 
 from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, list_devices, parse_device
 from speechflow.inserter import insert_text
+from speechflow.log import setup_logging
 from speechflow.notifier import notify
 from speechflow.transcriber import COMPUTE_TYPE, DEFAULT_LANGUAGE, DEFAULT_MODEL, SAMPLE_RATE, Transcriber
 
@@ -130,25 +131,30 @@ def main() -> None:
         list_devices()
         return
 
+    logger = setup_logging()
+
     if shutil.which("xdotool") is None:
-        sys.exit("Falta xdotool. Instálalo con: sudo apt install xdotool")
+        logger.error("Falta xdotool. Instálalo con: sudo apt install xdotool")
+        sys.exit(1)
     if os.environ.get("XDG_SESSION_TYPE", "x11") != "x11":
-        print(f"Aviso: la sesión es {os.environ['XDG_SESSION_TYPE']!r}, no x11; la tecla global y xdotool pueden no funcionar.", file=sys.stderr)
+        logger.warning(f"Aviso: la sesión es {os.environ['XDG_SESSION_TYPE']!r}, no x11; la tecla global y xdotool pueden no funcionar.")
     if shutil.which("notify-send") is None:
-        print("Aviso: falta notify-send (sudo apt install libnotify-bin); solo habrá mensajes por consola.", file=sys.stderr)
+        logger.warning("Aviso: falta notify-send (sudo apt install libnotify-bin); solo habrá mensajes por consola.")
 
     try:
         key = parse_key(args.key)
     except ValueError as error:
-        sys.exit(f"Error con --key: {error}")
+        logger.error(f"Error con --key: {error}")
+        sys.exit(1)
 
     device = args.device if args.device is not None else default_device()
     try:
         sd.query_devices(device, "input")
     except (sd.PortAudioError, ValueError) as error:
-        sys.exit(f"Error con el dispositivo de entrada {device!r}: {error}")
+        logger.error(f"Error con el dispositivo de entrada {device!r}: {error}")
+        sys.exit(1)
 
-    print(f"Cargando {args.model} ({COMPUTE_TYPE}, GPU)...")
+    logger.info(f"Cargando {args.model} ({COMPUTE_TYPE}, GPU)...")
     notify("SpeechFlow", f"Cargando {args.model}...")
     transcriber = Transcriber(args.model, args.language)
     notify("SpeechFlow", f"Modelo {args.model} cargado")
