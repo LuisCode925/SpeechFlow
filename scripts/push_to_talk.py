@@ -236,6 +236,7 @@ def main() -> None:
         return
 
     setup_logging()
+    log_banner()
     config = resolve_config(args.config)
     # CLI > archivo > defectos; un argumento solo cuenta si se escribió (defecto None)
     model = args.model if args.model is not None else config.model
@@ -291,7 +292,6 @@ def main() -> None:
         logger.error(f"Error con el dispositivo de entrada {device!r}: {error}")
         sys.exit(1)
 
-    log_banner()
     logger.info(f"Cargando {model} ({COMPUTE_TYPE}, GPU)...")
     notify("SpeechFlow", f"Cargando {model}...")
     started = time.perf_counter()
