@@ -28,11 +28,8 @@ from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, device_
 from speechflow.config import CONFIG_FILENAME, REPO_ROOT, USER_CONFIG_PATH, Config, ConfigError, find_config, load_config, write_emergency
 from speechflow.inserter import insert_text
 from speechflow.log import LOGGER_NAME, log_banner, setup_logging
-from speechflow.notifier import notify
+from speechflow.notifier import notify, set_enabled
 from speechflow.transcriber import COMPUTE_TYPE, SAMPLE_RATE, Transcriber
-
-MIN_SECONDS = 0.5  # por debajo no se transcribe ni se escribe nada
-MAX_SECONDS = 60.0  # la grabación se corta sola
 
 logger = logging.getLogger(LOGGER_NAME)
 
@@ -53,10 +50,14 @@ class PushToTalk:
         device: int | str | None,
         transcriber: Transcriber,
         model_name: str,
+        min_seconds: float,
+        max_seconds: float,
     ) -> None:
         self.key = key
         self.switch_key = switch_key
         self.model_name = model_name
+        self.min_seconds = min_seconds  # por debajo no se transcribe ni se escribe nada
+        self.max_seconds = max_seconds  # la grabación se corta sola
         self.recorder = Recorder(device)
         self.transcriber = transcriber
         self.state = State.IDLE
@@ -85,7 +86,7 @@ class PushToTalk:
                 notify("SpeechFlow", f"Error al abrir el micrófono: {error}")
                 return
             self.state = State.RECORDING
-            self._timer = threading.Timer(MAX_SECONDS, self._stop_recording, args=(True,))
+            self._timer = threading.Timer(self.max_seconds, self._stop_recording, args=(True,))
             self._timer.daemon = True
             self._timer.start()
         logger.info("Grabando...")
@@ -137,13 +138,13 @@ class PushToTalk:
                 self._timer = None
             audio = self.recorder.stop()
             seconds = len(audio) / SAMPLE_RATE
-            if seconds < MIN_SECONDS:
+            if seconds < self.min_seconds:
                 self.state = State.IDLE
-                logger.info(f"Grabación de {seconds:.2f} s descartada (mínimo {MIN_SECONDS} s).")
+                logger.info(f"Grabación de {seconds:.2f} s descartada (mínimo {self.min_seconds} s).")
                 return
             self.state = State.TRANSCRIBING
         if timed_out:
-            logger.warning(f"Límite de {MAX_SECONDS:.0f} s alcanzado; suelta la tecla y vuelve a pulsarla para otro dictado.")
+            logger.warning(f"Límite de {self.max_seconds:g} s alcanzado; suelta la tecla y vuelve a pulsarla para otro dictado.")
         logger.info(f"Grabación terminada: {seconds:.2f} s. Transcribiendo con {self.model_name}/{self.transcriber.language}...")
         threading.Thread(target=self._transcribe_and_insert, args=(audio,), daemon=True).start()
 
@@ -238,7 +239,8 @@ def main() -> None:
         sys.exit(1)
     if os.environ.get("XDG_SESSION_TYPE", "x11") != "x11":
         logger.warning(f"Aviso: la sesión es {os.environ['XDG_SESSION_TYPE']!r}, no x11; la tecla global y xdotool pueden no funcionar.")
-    if shutil.which("notify-send") is None:
+    set_enabled(config.notifications)
+    if config.notifications and shutil.which("notify-send") is None:
         logger.warning("Aviso: falta notify-send (sudo apt install libnotify-bin); solo habrá mensajes por consola.")
 
     try:
@@ -280,7 +282,7 @@ def main() -> None:
     logger.info(f"Cambio de entrada de audio: tecla {switch_key_name!r}.")
     logger.info(f"Listo. Mantén pulsada la tecla {key_name!r} para dictar. Ctrl+C para salir.")
 
-    push_to_talk = PushToTalk(key, switch_key, device, transcriber, model)
+    push_to_talk = PushToTalk(key, switch_key, device, transcriber, model, config.min_seconds, config.max_seconds)
     try:
         with keyboard.Listener(on_press=push_to_talk.on_press, on_release=push_to_talk.on_release) as listener:
             listener.join()
