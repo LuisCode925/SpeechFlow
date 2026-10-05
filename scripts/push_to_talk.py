@@ -5,6 +5,9 @@ resultado en la ventana con foco. Termina con Ctrl+C. `--list-devices` muestra l
 dispositivos de entrada disponibles. Una segunda tecla global (`--switch-key`, f8 por defecto)
 cambia en caliente al siguiente dispositivo de entrada, solo con el script en reposo. El arranque
 muestra un banner ASCII con las versiones de SpeechFlow y faster-whisper antes de cargar el modelo.
+
+Las opciones se pueden fijar en un archivo TOML (`--config RUTA`, `speechflow.toml` en la raíz del
+repo o `~/.config/speechflow/config.toml`); un argumento de la línea de comandos gana sobre el archivo.
 """
 import argparse
 import logging
@@ -22,13 +25,12 @@ import sounddevice as sd
 from pynput import keyboard
 
 from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, device_index, list_devices, next_input_device, parse_device, refresh_devices
+from speechflow.config import CONFIG_FILENAME, REPO_ROOT, USER_CONFIG_PATH, Config, ConfigError, find_config, load_config, write_emergency
 from speechflow.inserter import insert_text
 from speechflow.log import LOGGER_NAME, log_banner, setup_logging
 from speechflow.notifier import notify
-from speechflow.transcriber import COMPUTE_TYPE, DEFAULT_LANGUAGE, DEFAULT_MODEL, SAMPLE_RATE, Transcriber
+from speechflow.transcriber import COMPUTE_TYPE, SAMPLE_RATE, Transcriber
 
-DEFAULT_KEY = "ctrl_r"  # nombre de pynput.keyboard.Key, o un carácter suelto
-DEFAULT_SWITCH_KEY = "f8"  # tecla de cambio de entrada de audio, mismo formato
 MIN_SECONDS = 0.5  # por debajo no se transcribe ni se escribe nada
 MAX_SECONDS = 60.0  # la grabación se corta sola
 
@@ -182,14 +184,41 @@ def describe_device(device: int | str | None) -> str:
     return f"[{index}] {info['name']} | {int(info['default_samplerate'])} Hz nativos a {SAMPLE_RATE} Hz mono"
 
 
+def resolve_config(explicit: Path | None) -> Config:
+    """Carga la configuración de usuario; si falta o es inválida, avisa, deja la plantilla de emergencia y usa los defectos."""
+    if explicit is not None and not explicit.is_file():
+        logger.error(f"No existe el archivo de configuración {explicit}.")
+        sys.exit(1)
+    path = find_config(explicit)
+    if path is not None:
+        try:
+            config = load_config(path)
+        except ConfigError as error:
+            problem = f"Configuración inválida en {path}: {error}."
+        else:
+            logger.info(f"Configuración: {path}")
+            return config
+    else:
+        problem = f"No se encontró {CONFIG_FILENAME} ni {USER_CONFIG_PATH}."
+    try:
+        emergency = f"plantilla en {write_emergency(REPO_ROOT)}"
+    except OSError as error:
+        emergency = f"no se pudo crear la plantilla de emergencia: {error}"
+    logger.warning(f"{problem} Se usan los valores por defecto; {emergency}.")
+    logger.info("Configuración: valores por defecto")
+    return Config()
+
+
 def main() -> None:
+    defaults = Config()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list-devices", action="store_true", help="lista los dispositivos de entrada y termina")
     parser.add_argument("--device", type=parse_device, help=f"índice o nombre del dispositivo de entrada (defecto: el que contenga '{PREFERRED_DEVICE}', si no el del sistema)")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help="modelo de faster-whisper (defecto: %(default)s)")
-    parser.add_argument("--language", default=DEFAULT_LANGUAGE, help="idioma de la transcripción (defecto: %(default)s)")
-    parser.add_argument("--key", default=DEFAULT_KEY, help="tecla de disparo, nombre de pynput.keyboard.Key o un carácter (defecto: %(default)s)")
-    parser.add_argument("--switch-key", default=DEFAULT_SWITCH_KEY, help="tecla de cambio de entrada de audio, mismo formato que --key (defecto: %(default)s)")
+    parser.add_argument("--model", help=f"modelo de faster-whisper (defecto: {defaults.model})")
+    parser.add_argument("--language", help=f"idioma de la transcripción (defecto: {defaults.language})")
+    parser.add_argument("--key", help=f"tecla de disparo, nombre de pynput.keyboard.Key o un carácter (defecto: {defaults.key})")
+    parser.add_argument("--switch-key", help=f"tecla de cambio de entrada de audio, mismo formato que --key (defecto: {defaults.switch_key})")
+    parser.add_argument("--config", type=Path, help=f"archivo de configuración TOML (defecto: {CONFIG_FILENAME} en la raíz del repo, si no {USER_CONFIG_PATH})")
     args = parser.parse_args()
 
     if args.list_devices:
@@ -197,6 +226,12 @@ def main() -> None:
         return
 
     setup_logging()
+    config = resolve_config(args.config)
+    # CLI > archivo > defectos; un argumento solo cuenta si se escribió (defecto None)
+    model = args.model if args.model is not None else config.model
+    language = args.language if args.language is not None else config.language
+    key_name = args.key if args.key is not None else config.key
+    switch_key_name = args.switch_key if args.switch_key is not None else config.switch_key
 
     if shutil.which("xdotool") is None:
         logger.error("Falta xdotool. Instálalo con: sudo apt install xdotool")
@@ -207,20 +242,25 @@ def main() -> None:
         logger.warning("Aviso: falta notify-send (sudo apt install libnotify-bin); solo habrá mensajes por consola.")
 
     try:
-        key = parse_key(args.key)
+        key = parse_key(key_name)
     except ValueError as error:
         logger.error(f"Error con --key: {error}")
         sys.exit(1)
     try:
-        switch_key = parse_key(args.switch_key)
+        switch_key = parse_key(switch_key_name)
     except ValueError as error:
         logger.error(f"Error con --switch-key: {error}")
         sys.exit(1)
     if switch_key == key:
-        logger.error(f"--switch-key y --key no pueden ser la misma tecla ({args.key!r}).")
+        logger.error(f"--switch-key y --key no pueden ser la misma tecla ({key_name!r}).")
         sys.exit(1)
 
-    device = args.device if args.device is not None else default_device()
+    if args.device is not None:
+        device = args.device
+    elif config.device is not None:
+        device = parse_device(config.device) if isinstance(config.device, str) else config.device
+    else:
+        device = default_device()
     try:
         sd.query_devices(device, "input")
     except (sd.PortAudioError, ValueError) as error:
@@ -228,26 +268,26 @@ def main() -> None:
         sys.exit(1)
 
     log_banner()
-    logger.info(f"Cargando {args.model} ({COMPUTE_TYPE}, GPU)...")
-    notify("SpeechFlow", f"Cargando {args.model}...")
+    logger.info(f"Cargando {model} ({COMPUTE_TYPE}, GPU)...")
+    notify("SpeechFlow", f"Cargando {model}...")
     started = time.perf_counter()
-    transcriber = Transcriber(args.model, args.language)
+    transcriber = Transcriber(model, language)
     load_seconds = time.perf_counter() - started
-    notify("SpeechFlow", f"Modelo {args.model} cargado")
-    logger.info(f"Modelo: {args.model} | idioma: {args.language} | compute_type: {COMPUTE_TYPE} | GPU")
+    notify("SpeechFlow", f"Modelo {model} cargado")
+    logger.info(f"Modelo: {model} | idioma: {language} | compute_type: {COMPUTE_TYPE} | GPU")
     logger.info(f"Modelo cargado en {load_seconds:.2f} s (incluye calentamiento)")
     logger.info(f"Dispositivo de audio: {describe_device(device)}")
-    logger.info(f"Cambio de entrada de audio: tecla {args.switch_key!r}.")
-    logger.info(f"Listo. Mantén pulsada la tecla {args.key!r} para dictar. Ctrl+C para salir.")
+    logger.info(f"Cambio de entrada de audio: tecla {switch_key_name!r}.")
+    logger.info(f"Listo. Mantén pulsada la tecla {key_name!r} para dictar. Ctrl+C para salir.")
 
-    push_to_talk = PushToTalk(key, switch_key, device, transcriber, args.model)
+    push_to_talk = PushToTalk(key, switch_key, device, transcriber, model)
     try:
         with keyboard.Listener(on_press=push_to_talk.on_press, on_release=push_to_talk.on_release) as listener:
             listener.join()
     except KeyboardInterrupt:
         logger.info("Saliendo.")
         transcriber.close()
-        logger.info(f"Modelo {args.model} liberado.")
+        logger.info(f"Modelo {model} liberado.")
         notify("SpeechFlow", "Modelo liberado")
 
 
