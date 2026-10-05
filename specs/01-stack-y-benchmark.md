@@ -71,15 +71,15 @@ benchmarks/results.md    # resultado commiteado
 
 ## Criterios de aceptación
 
-- [ ] `conda env create -f environment.yml` crea el entorno `speechflow` sin errores en Debian 13.
-- [ ] `ctranslate2.get_cuda_device_count()` devuelve `1` dentro del entorno.
-- [ ] `python scripts/benchmark_stt.py` transcribe al menos un WAV en español y uno en inglés de `benchmarks/samples/` con `small` y `medium` en `int8` sobre GPU.
-- [ ] `benchmarks/results.md` contiene tiempo de carga, tiempo de transcripción, duración del audio y pico de VRAM por cada combinación modelo/muestra.
-- [ ] Al menos un modelo transcribe una muestra de ~10 s en menos de 2 s (sin contar la carga del modelo), o `results.md` documenta explícitamente que ninguno lo logra.
-- [ ] El pico de VRAM de cada modelo es menor a 6 GB.
-- [ ] `results.md` indica qué modelo queda como defecto para la siguiente spec.
-- [ ] `benchmarks/samples/` no está versionado en git.
-- [ ] `README.md` explica cómo crear el entorno y ejecutar el benchmark.
+- [X] `conda env create -f environment.yml` crea el entorno `speechflow` sin errores en Debian 13.
+- [X] `ctranslate2.get_cuda_device_count()` devuelve `1` dentro del entorno.
+- [X] `python scripts/benchmark_stt.py` transcribe al menos un WAV en español y uno en inglés de `benchmarks/samples/` con `small` y `medium` en `int8` sobre GPU.
+- [X] `benchmarks/results.md` contiene tiempo de carga, tiempo de transcripción, duración del audio y pico de VRAM por cada combinación modelo/muestra.
+- [X] Al menos un modelo transcribe una muestra de ~10 s en menos de 2 s (sin contar la carga del modelo), o `results.md` documenta explícitamente que ninguno lo logra.
+- [X] El pico de VRAM de cada modelo es menor a 6 GB.
+- [X] `results.md` indica qué modelo queda como defecto para la siguiente spec.
+- [X] `benchmarks/samples/` no está versionado en git.
+- [X] `README.md` explica cómo crear el entorno y ejecutar el benchmark.
 
 ## Decisiones
 
