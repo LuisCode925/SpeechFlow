@@ -121,6 +121,7 @@ class PushToTalk:
                 return
             self.recorder.device = new_device
             logger.info(f"Entrada de audio cambiada: {describe_device(new_device)}")
+            notify("SpeechFlow", f"Entrada de audio: {sd.query_devices(new_device)['name']}")
 
     def _stop_recording(self, timed_out: bool) -> None:
         """Detiene la grabación (al soltar o por el temporizador); descarta lo corto o lanza la transcripción."""
