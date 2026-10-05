@@ -9,6 +9,7 @@ import os
 import shutil
 import sys
 import threading
+import time
 from enum import Enum
 from pathlib import Path
 
@@ -118,6 +119,17 @@ def parse_key(name: str) -> keyboard.Key | keyboard.KeyCode:
         raise ValueError(f"tecla desconocida {name!r}; usa un nombre de pynput.keyboard.Key (ctrl_r, f9, ...) o un carácter") from None
 
 
+def describe_device(device: int | str | None) -> str:
+    """Texto `[índice] nombre | tasa Hz nativos a SAMPLE_RATE Hz mono` del dispositivo de entrada."""
+    info = sd.query_devices(device, "input")
+    index = info.get("index")
+    if index is None:
+        index = device if isinstance(device, int) else next(
+            (i for i, candidate in enumerate(sd.query_devices()) if candidate["name"] == info["name"]), "?"
+        )
+    return f"[{index}] {info['name']} | {int(info['default_samplerate'])} Hz nativos a {SAMPLE_RATE} Hz mono"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list-devices", action="store_true", help="lista los dispositivos de entrada y termina")
@@ -156,9 +168,14 @@ def main() -> None:
 
     logger.info(f"Cargando {args.model} ({COMPUTE_TYPE}, GPU)...")
     notify("SpeechFlow", f"Cargando {args.model}...")
+    started = time.perf_counter()
     transcriber = Transcriber(args.model, args.language)
+    load_seconds = time.perf_counter() - started
     notify("SpeechFlow", f"Modelo {args.model} cargado")
-    print(f"Listo. Mantén pulsada la tecla {args.key!r} para dictar. Ctrl+C para salir.")
+    logger.info(f"Modelo: {args.model} | idioma: {args.language} | compute_type: {COMPUTE_TYPE} | GPU")
+    logger.info(f"Modelo cargado en {load_seconds:.2f} s (incluye calentamiento)")
+    logger.info(f"Dispositivo de audio: {describe_device(device)}")
+    logger.info(f"Listo. Mantén pulsada la tecla {args.key!r} para dictar. Ctrl+C para salir.")
 
     push_to_talk = PushToTalk(key, device, transcriber)
     try:
