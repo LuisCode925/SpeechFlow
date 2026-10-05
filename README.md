@@ -95,7 +95,8 @@ print(f"{seconds:.2f} s: {text}")
 
 - `src/speechflow/audio.py`: dispositivos de entrada, remuestreo, medición, guardado de WAV y `Recorder` (`start()` / `stop()`), que graba a la tasa nativa del dispositivo y devuelve `int16` mono a 16 kHz. Para el cambio de entrada en caliente expone `input_devices()` (índices con entrada), `refresh_devices()` (reinicializa PortAudio para ver micrófonos conectados o desconectados; solo sin streams abiertos), `device_index()` (índice real de un dispositivo, o `None`) y `next_input_device()` (el siguiente, con vuelta al principio). Lo usan `capture_mic.py` y `push_to_talk.py`.
 - `src/speechflow/inserter.py`: `insert_text(text)` escribe el texto en la ventana con foco con `xdotool type --clearmodifiers`.
-- `src/speechflow/notifier.py`: `notify(title, body)` envía una notificación de escritorio con `notify-send`; si no está instalado, no hace nada.
+- `src/speechflow/notifier.py`: `notify(title, body)` envía una notificación de escritorio con `notify-send`; si no está instalado o están desactivadas con `set_enabled(False)`, no hace nada.
+- `src/speechflow/config.py`: configuración de usuario de `push_to_talk.py` (`Config`, `find_config()`, `load_config()`, `write_emergency()` y el estado del micrófono con `load_state_device()` / `save_state_device()`). Ver [Configuración](#configuración).
 - `src/speechflow/log.py`: `setup_logging()` configura el logger `speechflow` con el formato `AAAA-MM-DD HH:MM:SS.mmm NIVEL mensaje` (hora local). Las líneas `INFO` salen por stdout y las `WARNING` y `ERROR` por stderr. Es idempotente. `log_banner()` imprime por stdout, sin prefijo, el arte ASCII de SpeechFlow con su versión y la de `faster-whisper`; `push_to_talk.py` lo muestra justo antes de `Cargando ...`, una vez superadas las validaciones de arranque. Por ahora solo lo usa `push_to_talk.py`.
 
 ## Push-to-talk
@@ -108,11 +109,13 @@ python scripts/push_to_talk.py                  # Right Ctrl, modelo medium, esp
 python scripts/push_to_talk.py --key f9         # otra tecla de disparo
 python scripts/push_to_talk.py --switch-key f7  # otra tecla de cambio de entrada
 python scripts/push_to_talk.py --device 6 --model small --language en
+python scripts/push_to_talk.py --config mi-config.toml
 ```
 
 Salida de ejemplo:
 
 ```
+2026-10-05 14:32:02.580 INFO    Configuración: /home/usuario/speech-flow/speechflow.toml
 ________                       ______ _______________
 __  ___/__________________________  /____  ____/__  /________      __
 _____ \___  __ \  _ \  _ \  ___/_  __ \_  /_   __  /_  __ \_ | /| / /
@@ -148,17 +151,65 @@ Opciones:
 | `--language` | Idioma de la transcripción. | `es` |
 | `--key` | Tecla de disparo: nombre de `pynput.keyboard.Key` (`ctrl_r`, `f9`, ...) o un carácter suelto. Falla con un mensaje claro si no existe. | `ctrl_r` |
 | `--switch-key` | Tecla de cambio de entrada de audio, mismo formato que `--key`. Debe ser distinta de `--key`; si no, el script sale con código 1. | `f8` |
+| `--config` | Archivo de configuración TOML. Si no existe, el script sale con código 1. | `speechflow.toml` en la raíz del repo; si no, `~/.config/speechflow/config.toml` |
+
+Un argumento escrito en la línea de comandos gana sobre el archivo de configuración (ver [Configuración](#configuración)).
 
 - **Modelo:** se carga una sola vez al arrancar, así que cada dictado responde rápido. Con `medium` int8 en la GTX 1060, ~11 s de audio tardaron 1.03 s.
-- **Grabaciones cortas:** las de menos de 0.5 s se descartan sin invocar al modelo (evita escribir texto basura por toques accidentales).
-- **Límite:** a los 60 s la grabación se corta sola, se transcribe lo grabado y se avisa. No empieza otra hasta soltar la tecla y volver a pulsarla.
+- **Grabaciones cortas:** las de menos de 0.5 s (`[recording] min_seconds`) se descartan sin invocar al modelo (evita escribir texto basura por toques accidentales).
+- **Límite:** a los 60 s (`[recording] max_seconds`) la grabación se corta sola, se transcribe lo grabado y se avisa. No empieza otra hasta soltar la tecla y volver a pulsarla.
 - **Durante la transcripción:** pulsar la tecla no inicia otra grabación.
-- **Avisos:** todo se muestra por consola con prefijo de fecha, hora y nivel. Como notificación de escritorio solo salen el ciclo de vida del modelo (`Cargando {modelo}...`, `Modelo {modelo} cargado`, `Modelo liberado`), los errores (micrófono, transcripción o inserción) y el cambio de entrada de audio (`Entrada de audio: {nombre}`). Dictar no genera notificaciones. Si falta `notify-send`, se avisa una vez y sigue funcionando solo con consola.
-- **Cambio de entrada en caliente:** pulsar `--switch-key` (`f8`) pasa al siguiente dispositivo de entrada, en orden de índice y con vuelta al principio, sin recargar el modelo. Cada pulsación relee la lista de dispositivos, así que un micrófono conectado o desconectado con el script en marcha se tiene en cuenta. La rotación incluye todo lo que muestra `--list-devices` (también los `Loopback`; si el elegido no abre, el error sale al dictar y basta pulsar la tecla otra vez). Solo cambia en reposo: durante la grabación o la transcripción se registra un `WARNING` y no pasa nada. Con un único dispositivo se registra `Solo hay un dispositivo de entrada: ...` sin notificación. El dispositivo elegido no se guarda: al reiniciar vuelve a `--device` o al valor por defecto.
+- **Avisos:** todo se muestra por consola con prefijo de fecha, hora y nivel. Como notificación de escritorio solo salen el ciclo de vida del modelo (`Cargando {modelo}...`, `Modelo {modelo} cargado`, `Modelo liberado`), los errores (micrófono, transcripción o inserción) y el cambio de entrada de audio (`Entrada de audio: {nombre}`). Dictar no genera notificaciones. Si falta `notify-send`, se avisa una vez y sigue funcionando solo con consola. Con `[notifications] enabled = false` no sale ninguna notificación y ese aviso tampoco.
+- **Cambio de entrada en caliente:** pulsar `--switch-key` (`f8`) pasa al siguiente dispositivo de entrada, en orden de índice y con vuelta al principio, sin recargar el modelo. Cada pulsación relee la lista de dispositivos, así que un micrófono conectado o desconectado con el script en marcha se tiene en cuenta. La rotación incluye todo lo que muestra `--list-devices` (también los `Loopback`; si el elegido no abre, el error sale al dictar y basta pulsar la tecla otra vez). Solo cambia en reposo: durante la grabación o la transcripción se registra un `WARNING` y no pasa nada. Con un único dispositivo se registra `Solo hay un dispositivo de entrada: ...` sin notificación. Un cambio efectivo guarda el nombre del dispositivo en `.speechflow-state.toml`, y al reiniciar se usa ese micrófono (ver [Configuración](#configuración)).
 - **Salida:** `Ctrl+C` libera el modelo con `Transcriber.close()` (suelta la GPU antes de terminar el proceso) y notifica `Modelo liberado`; la consola muestra `Saliendo.` y `Modelo {modelo} liberado.`.
 - **Requisitos:** sesión X11 y `xdotool` instalado; si falta, el script sale al arrancar con código 1 y una línea `ERROR` indicando `sudo apt install xdotool`. Los errores de arranque (`--key`, `--switch-key` o `--device` inválidos, o `--switch-key` igual a `--key`) también terminan con código 1.
 - **Foco:** el texto se escribe en la ventana que tenga el foco cuando termina la transcripción. Si cambias de ventana mientras se transcribe, se escribirá en la nueva.
 - **Una sola instancia:** no ejecutes dos a la vez; ambas reaccionarían a la misma tecla y competirían por el micrófono.
+
+## Configuración
+
+`push_to_talk.py` lee un archivo TOML opcional (solo él; `capture_mic.py`, `benchmark_stt.py` y `--list-devices` no lo usan). Se usa el primero que exista, sin fusionar:
+
+1. `--config RUTA` (si no existe, el script sale con `ERROR` y código 1).
+2. `speechflow.toml` en la raíz del repo (la carpeta que contiene `scripts/` y `src/`), sea cual sea el directorio de trabajo.
+3. `~/.config/speechflow/config.toml`.
+
+`speechflow.example.toml` es un ejemplo con todas las claves comentadas; cópialo a `speechflow.toml`. Todas las claves son opcionales:
+
+```toml
+[model]
+name = "medium"
+language = "es"
+
+[keys]
+record = "ctrl_r"
+switch = "f8"
+
+[audio]
+device = "Realtek"          # índice (entero) o parte del nombre; sin defecto
+
+[recording]
+min_seconds = 0.5
+max_seconds = 60.0
+
+[notifications]
+enabled = true
+```
+
+**Precedencia por valor:** argumento de CLI (solo si se escribió) > micrófono guardado (solo el dispositivo) > archivo > defectos. En concreto, el dispositivo es `--device` > `.speechflow-state.toml` > `[audio] device` > el que contenga "Realtek", si no el del sistema.
+
+**Validación:** una clave o sección desconocida, un tipo incorrecto, `min_seconds <= 0` o `max_seconds <= min_seconds` hacen inválido el archivo. Las teclas se siguen validando al arrancar con los mismos mensajes `ERROR` de `--key` y `--switch-key`.
+
+**Archivo de emergencia:** si no se encuentra ningún archivo, o el encontrado no se puede leer o no es válido, el script registra un `WARNING` con la causa, crea `speechflow.emergency.toml` en la raíz del repo con todos los valores por defecto (sin sobrescribirlo si ya existe) y sigue con los defectos. El archivo inválido del usuario no se toca. La plantilla de emergencia no se lee nunca: cópiala o renómbrala a `speechflow.toml` para usarla.
+
+```
+2026-10-05 14:32:02.580 WARNING Configuración inválida en /home/usuario/speech-flow/speechflow.toml: clave desconocida model.modle. Se usan los valores por defecto; plantilla en /home/usuario/speech-flow/speechflow.emergency.toml.
+2026-10-05 14:32:02.580 INFO    Configuración: valores por defecto
+```
+
+**Micrófono guardado:** cada cambio efectivo con `--switch-key` escribe el **nombre** del dispositivo en `.speechflow-state.toml` (raíz del repo; lo escribe el script, no se edita a mano). Al arrancar se usa ese micrófono salvo que se pase `--device`. Si ya no está disponible (por ejemplo, un USB desenchufado), se registra un `WARNING` y se usa el siguiente nivel de la precedencia.
+
+`speechflow.toml`, `speechflow.emergency.toml` y `.speechflow-state.toml` están en `.gitignore`; solo `speechflow.example.toml` se versiona.
 
 ## Captura del micrófono
 

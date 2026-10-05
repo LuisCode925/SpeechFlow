@@ -6,8 +6,12 @@ dispositivos de entrada disponibles. Una segunda tecla global (`--switch-key`, f
 cambia en caliente al siguiente dispositivo de entrada, solo con el script en reposo. El arranque
 muestra un banner ASCII con las versiones de SpeechFlow y faster-whisper antes de cargar el modelo.
 
-Las opciones se pueden fijar en un archivo TOML (`--config RUTA`, `speechflow.toml` en la raíz del
-repo o `~/.config/speechflow/config.toml`); un argumento de la línea de comandos gana sobre el archivo.
+Las opciones (modelo, idioma, teclas, dispositivo, límites de grabación y notificaciones) se pueden
+fijar en un archivo TOML: `--config RUTA`, si no `speechflow.toml` en la raíz del repo, si no
+`~/.config/speechflow/config.toml` (ver `speechflow.example.toml`). Precedencia: CLI > micrófono
+guardado con `--switch-key` en `.speechflow-state.toml` (solo el dispositivo) > archivo > defectos.
+Sin archivo, o con uno inválido, se avisa, se crea la plantilla `speechflow.emergency.toml` y se usan
+los defectos.
 """
 import argparse
 import logging

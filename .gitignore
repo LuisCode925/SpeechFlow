@@ -2,3 +2,5 @@ benchmarks/samples/
 benchmarks/captures/
 __pycache__/
 speechflow.emergency.toml
+speechflow.toml
+.speechflow-state.toml

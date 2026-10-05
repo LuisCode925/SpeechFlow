@@ -1,0 +1,21 @@
+# speechflow.example.toml — ejemplo de configuración de push_to_talk.py.
+# Cópialo a speechflow.toml (raíz del repo) o a ~/.config/speechflow/config.toml y descomenta lo que quieras cambiar.
+# Todas las claves son opcionales; los valores mostrados son los defectos. Un argumento de CLI gana sobre este archivo.
+
+[model]
+# name = "medium"
+# language = "es"
+
+[keys]
+# record = "ctrl_r"      # nombre de pynput.keyboard.Key (ctrl_r, f9, ...) o un carácter suelto
+# switch = "f8"          # tecla de cambio de entrada de audio; distinta de record
+
+[audio]
+# device = "Realtek"     # índice (entero) o parte del nombre; sin definir: el que contenga "Realtek", si no el del sistema
+
+[recording]
+# min_seconds = 0.5      # por debajo no se transcribe ni se escribe nada
+# max_seconds = 60.0     # la grabación se corta sola; debe ser mayor que min_seconds
+
+[notifications]
+# enabled = true         # false desactiva todas las notificaciones de escritorio

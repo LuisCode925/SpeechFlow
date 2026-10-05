@@ -7,7 +7,7 @@ Ideas recogidas de la sección "Lo que **no** está en esta spec" de las SPEC 01
 - [ ] VAD (detección de actividad de voz) y recorte de silencios (SPEC 01, 03, 04, 05).
 - [ ] Streaming de la captura y de la transcripción (SPEC 03, 04, 05).
 - [ ] Reducción de ruido (SPEC 03).
-- [ ] Persistencia del dispositivo de audio elegido entre ejecuciones (SPEC 08).
+- [x] ~~Persistencia del dispositivo de audio elegido entre ejecuciones (SPEC 08).~~ (SPEC 10)
 - [ ] Cambio de dispositivo por otros medios: stdin, señales, bandeja o menú gráfico (SPEC 08).
 - [ ] Retroceder en la rotación, elegir por índice o por nombre en caliente, y listas de rotación configurables (SPEC 08).
 - [ ] Cambio automático al conectar, desconectar o fallar un dispositivo (SPEC 08).
@@ -37,8 +37,8 @@ Ideas recogidas de la sección "Lo que **no** está en esta spec" de las SPEC 01
 
 ## Configuración
 
-- [ ] Archivo de configuración de usuario (SPEC 01, 05).
-- [ ] Opciones o archivo de configuración para las notificaciones (SPEC 06).
+- [x] ~~Archivo de configuración de usuario (SPEC 01, 05).~~ (SPEC 10)
+- [x] ~~Opciones o archivo de configuración para las notificaciones (SPEC 06).~~ (SPEC 10)
 
 ## Log y diagnóstico
 
