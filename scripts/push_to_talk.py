@@ -154,7 +154,9 @@ def main() -> None:
         sys.exit(f"Error con el dispositivo de entrada {device!r}: {error}")
 
     print(f"Cargando {args.model} ({COMPUTE_TYPE}, GPU)...")
+    notify("SpeechFlow", f"Cargando {args.model}...")
     transcriber = Transcriber(args.model, args.language)
+    notify("SpeechFlow", f"Modelo {args.model} cargado")
     print(f"Listo. Mantén pulsada la tecla {args.key!r} para dictar. Ctrl+C para salir.")
 
     push_to_talk = PushToTalk(key, device, transcriber)
