@@ -188,8 +188,9 @@ def main() -> None:
         with keyboard.Listener(on_press=push_to_talk.on_press, on_release=push_to_talk.on_release) as listener:
             listener.join()
     except KeyboardInterrupt:
-        print("\nSaliendo.")
+        logger.info("Saliendo.")
         transcriber.close()
+        logger.info(f"Modelo {args.model} liberado.")
         notify("SpeechFlow", "Modelo liberado")
 
 
