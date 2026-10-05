@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 import sounddevice as sd
 from pynput import keyboard
 
-from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, device_index, list_devices, parse_device
+from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, device_index, list_devices, next_input_device, parse_device, refresh_devices
 from speechflow.inserter import insert_text
 from speechflow.log import LOGGER_NAME, setup_logging
 from speechflow.notifier import notify
@@ -62,6 +62,12 @@ class PushToTalk:
         self._lock = threading.Lock()
 
     def on_press(self, key) -> None:
+        if key == self.switch_key:
+            with self._lock:
+                was_held, self._switch_held = self._switch_held, True
+            if not was_held:
+                self.switch_device()
+            return
         if key != self.key:
             return
         with self._lock:
@@ -81,11 +87,40 @@ class PushToTalk:
         logger.info("Grabando...")
 
     def on_release(self, key) -> None:
+        if key == self.switch_key:
+            with self._lock:
+                self._switch_held = False
+            return
         if key != self.key:
             return
         with self._lock:
             self._held = False
         self._stop_recording(False)
+
+    def switch_device(self) -> None:
+        """Pasa al siguiente dispositivo de entrada; solo en IDLE, nunca con un stream abierto."""
+        with self._lock:
+            if self.state is not State.IDLE:
+                logger.warning("No se cambia la entrada de audio mientras se graba o se transcribe.")
+                return
+            try:
+                previous = describe_device(self.recorder.device)
+            except (sd.PortAudioError, ValueError):
+                previous = repr(self.recorder.device)
+            try:
+                refresh_devices()
+                new_device = next_input_device(self.recorder.device)
+            except Exception as error:
+                logger.error(f"Error al releer los dispositivos de audio: {error}; se mantiene {previous}.")
+                return
+            if new_device is None:
+                logger.error(f"No hay dispositivos de entrada disponibles; se mantiene {previous}.")
+                return
+            if new_device == device_index(self.recorder.device):
+                logger.info(f"Solo hay un dispositivo de entrada: {describe_device(new_device)}")
+                return
+            self.recorder.device = new_device
+            logger.info(f"Entrada de audio cambiada: {describe_device(new_device)}")
 
     def _stop_recording(self, timed_out: bool) -> None:
         """Detiene la grabación (al soltar o por el temporizador); descarta lo corto o lanza la transcripción."""
