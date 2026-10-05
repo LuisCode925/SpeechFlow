@@ -25,7 +25,7 @@ import sounddevice as sd
 from pynput import keyboard
 
 from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, device_index, list_devices, next_input_device, parse_device, refresh_devices
-from speechflow.config import CONFIG_FILENAME, REPO_ROOT, USER_CONFIG_PATH, Config, ConfigError, find_config, load_config, write_emergency
+from speechflow.config import CONFIG_FILENAME, REPO_ROOT, STATE_FILENAME, USER_CONFIG_PATH, Config, ConfigError, find_config, load_config, load_state_device, save_state_device, write_emergency
 from speechflow.inserter import insert_text
 from speechflow.log import LOGGER_NAME, log_banner, setup_logging
 from speechflow.notifier import notify, set_enabled
@@ -126,7 +126,12 @@ class PushToTalk:
                 return
             self.recorder.device = new_device
             logger.info(f"Entrada de audio cambiada: {describe_device(new_device)}")
-            notify("SpeechFlow", f"Entrada de audio: {sd.query_devices(new_device)['name']}")
+            name = sd.query_devices(new_device)["name"]
+            notify("SpeechFlow", f"Entrada de audio: {name}")
+            try:
+                save_state_device(name)
+            except OSError as error:
+                logger.warning(f"No se pudo guardar la entrada de audio en {STATE_FILENAME}: {error}")
 
     def _stop_recording(self, timed_out: bool) -> None:
         """Detiene la grabación (al soltar o por el temporizador); descarta lo corto o lanza la transcripción."""
@@ -257,12 +262,25 @@ def main() -> None:
         logger.error(f"--switch-key y --key no pueden ser la misma tecla ({key_name!r}).")
         sys.exit(1)
 
+    # --device > estado guardado > [audio] device > default_device()
+    if config.device is not None:
+        fallback = parse_device(config.device) if isinstance(config.device, str) else config.device
+        fallback_label = f"[audio] device {fallback!r}"
+    else:
+        fallback, fallback_label = None, "el dispositivo por defecto"
+    saved = load_state_device() if args.device is None else None
+    if saved is not None:
+        try:
+            sd.query_devices(saved, "input")
+        except (sd.PortAudioError, ValueError):
+            logger.warning(f"El dispositivo guardado {saved!r} no está disponible; se usa {fallback_label}.")
+            saved = None
     if args.device is not None:
         device = args.device
-    elif config.device is not None:
-        device = parse_device(config.device) if isinstance(config.device, str) else config.device
+    elif saved is not None:
+        device = saved
     else:
-        device = default_device()
+        device = fallback if fallback is not None else default_device()
     try:
         sd.query_devices(device, "input")
     except (sd.PortAudioError, ValueError) as error:
