@@ -22,7 +22,7 @@ from pynput import keyboard
 
 from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, device_index, list_devices, next_input_device, parse_device, refresh_devices
 from speechflow.inserter import insert_text
-from speechflow.log import LOGGER_NAME, setup_logging
+from speechflow.log import LOGGER_NAME, log_banner, setup_logging
 from speechflow.notifier import notify
 from speechflow.transcriber import COMPUTE_TYPE, DEFAULT_LANGUAGE, DEFAULT_MODEL, SAMPLE_RATE, Transcriber
 
@@ -226,6 +226,7 @@ def main() -> None:
         logger.error(f"Error con el dispositivo de entrada {device!r}: {error}")
         sys.exit(1)
 
+    log_banner()
     logger.info(f"Cargando {args.model} ({COMPUTE_TYPE}, GPU)...")
     notify("SpeechFlow", f"Cargando {args.model}...")
     started = time.perf_counter()
