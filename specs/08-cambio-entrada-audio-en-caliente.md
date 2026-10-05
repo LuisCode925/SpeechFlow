@@ -1,6 +1,6 @@
 # SPEC 08 — Cambio de entrada de audio en caliente
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 03, SPEC 05, SPEC 06, SPEC 07
 > **Fecha:** 2026-10-05
 > **Objetivo:** Permitir cambiar el dispositivo de entrada de audio de `push_to_talk.py` mientras corre, con una segunda tecla global que cicla entre los micrófonos disponibles y avisa por log y notificación de escritorio.
