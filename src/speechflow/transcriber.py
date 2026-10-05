@@ -1,4 +1,5 @@
 """Transcripción de audio con faster-whisper: carga el modelo una vez y transcribe muchas."""
+import gc
 import time
 
 import numpy as np
@@ -26,3 +27,8 @@ class Transcriber:
         segments, _info = self._model.transcribe(samples, language=self.language)
         text = " ".join(segment.text.strip() for segment in segments)
         return text, time.perf_counter() - start
+
+    def close(self) -> None:
+        """Suelta el modelo y fuerza la recolección para liberar la GPU; idempotente."""
+        self._model = None
+        gc.collect()
