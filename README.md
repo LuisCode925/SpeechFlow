@@ -88,6 +88,7 @@ print(f"{seconds:.2f} s: {text}")
 - **Entrada:** `numpy.ndarray` `int16`, mono, a 16 kHz. El módulo no valida la tasa: un audio a otra tasa da transcripciones erróneas sin aviso.
 - **Salida:** `(texto, segundos)`. Los segundos no incluyen la carga del modelo ni el calentamiento. Un array vacío devuelve `("", 0.0)` sin invocar al modelo.
 - **Parámetros:** modelo (defecto `medium`) e idioma (defecto `es`, fijo, sin detección automática).
+- **Liberación:** `close()` suelta la referencia al modelo y fuerza la recolección de basura para liberar la GPU. Es idempotente; no se debe llamar a `transcribe()` después.
 - `scripts/capture_mic.py` usa este módulo.
 
 ## Módulos de captura, inserción y notificación
@@ -131,7 +132,8 @@ Opciones:
 - **Grabaciones cortas:** las de menos de 0.5 s se descartan sin invocar al modelo (evita escribir texto basura por toques accidentales).
 - **Límite:** a los 60 s la grabación se corta sola, se transcribe lo grabado y se avisa. No empieza otra hasta soltar la tecla y volver a pulsarla.
 - **Durante la transcripción:** pulsar la tecla no inicia otra grabación.
-- **Avisos:** se muestran por consola y como notificación de escritorio (grabando, transcribiendo, texto insertado, error). Si falta `notify-send`, se avisa una vez y sigue funcionando solo con consola.
+- **Avisos:** todo se muestra por consola. Como notificación de escritorio solo salen el ciclo de vida del modelo (`Cargando {modelo}...`, `Modelo {modelo} cargado`, `Modelo liberado`) y los errores (micrófono, transcripción o inserción). Dictar no genera notificaciones. Si falta `notify-send`, se avisa una vez y sigue funcionando solo con consola.
+- **Salida:** `Ctrl+C` libera el modelo con `Transcriber.close()` (suelta la GPU antes de terminar el proceso) y notifica `Modelo liberado`.
 - **Requisitos:** sesión X11 y `xdotool` instalado; si falta, el script sale al arrancar indicando `sudo apt install xdotool`.
 - **Foco:** el texto se escribe en la ventana que tenga el foco cuando termina la transcripción. Si cambias de ventana mientras se transcribe, se escribirá en la nueva.
 - **Una sola instancia:** no ejecutes dos a la vez; ambas reaccionarían a la misma tecla y competirían por el micrófono.

@@ -1,6 +1,6 @@
 # SPEC 06 — Notificaciones de carga y liberación del modelo
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 04, SPEC 05
 > **Fecha:** 2026-10-04
 > **Objetivo:** Reducir las notificaciones de escritorio de `push_to_talk.py` a las del ciclo de vida del modelo (cargando, cargado, liberado) y a los errores, dejando el resto de avisos solo en consola.
