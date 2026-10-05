@@ -1,6 +1,6 @@
 # SPEC 09 — Banner ASCII de arranque en el log
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 07
 > **Fecha:** 2026-10-05
 > **Objetivo:** Imprimir al principio del log de `push_to_talk.py` un banner con el arte ASCII de SpeechFlow, su nombre, su versión y la versión de `faster-whisper`, justo antes de la línea `Cargando ...`.

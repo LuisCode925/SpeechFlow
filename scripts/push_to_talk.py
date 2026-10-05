@@ -3,7 +3,8 @@
 Graba mientras la tecla está pulsada, transcribe con faster-whisper al soltar y escribe el
 resultado en la ventana con foco. Termina con Ctrl+C. `--list-devices` muestra los
 dispositivos de entrada disponibles. Una segunda tecla global (`--switch-key`, f8 por defecto)
-cambia en caliente al siguiente dispositivo de entrada, solo con el script en reposo.
+cambia en caliente al siguiente dispositivo de entrada, solo con el script en reposo. El arranque
+muestra un banner ASCII con las versiones de SpeechFlow y faster-whisper antes de cargar el modelo.
 """
 import argparse
 import logging

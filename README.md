@@ -96,7 +96,7 @@ print(f"{seconds:.2f} s: {text}")
 - `src/speechflow/audio.py`: dispositivos de entrada, remuestreo, medición, guardado de WAV y `Recorder` (`start()` / `stop()`), que graba a la tasa nativa del dispositivo y devuelve `int16` mono a 16 kHz. Para el cambio de entrada en caliente expone `input_devices()` (índices con entrada), `refresh_devices()` (reinicializa PortAudio para ver micrófonos conectados o desconectados; solo sin streams abiertos), `device_index()` (índice real de un dispositivo, o `None`) y `next_input_device()` (el siguiente, con vuelta al principio). Lo usan `capture_mic.py` y `push_to_talk.py`.
 - `src/speechflow/inserter.py`: `insert_text(text)` escribe el texto en la ventana con foco con `xdotool type --clearmodifiers`.
 - `src/speechflow/notifier.py`: `notify(title, body)` envía una notificación de escritorio con `notify-send`; si no está instalado, no hace nada.
-- `src/speechflow/log.py`: `setup_logging()` configura el logger `speechflow` con el formato `AAAA-MM-DD HH:MM:SS.mmm NIVEL mensaje` (hora local). Las líneas `INFO` salen por stdout y las `WARNING` y `ERROR` por stderr. Es idempotente. Por ahora solo lo usa `push_to_talk.py`.
+- `src/speechflow/log.py`: `setup_logging()` configura el logger `speechflow` con el formato `AAAA-MM-DD HH:MM:SS.mmm NIVEL mensaje` (hora local). Las líneas `INFO` salen por stdout y las `WARNING` y `ERROR` por stderr. Es idempotente. `log_banner()` imprime por stdout, sin prefijo, el arte ASCII de SpeechFlow con su versión y la de `faster-whisper`; `push_to_talk.py` lo muestra justo antes de `Cargando ...`, una vez superadas las validaciones de arranque. Por ahora solo lo usa `push_to_talk.py`.
 
 ## Push-to-talk
 
@@ -113,6 +113,15 @@ python scripts/push_to_talk.py --device 6 --model small --language en
 Salida de ejemplo:
 
 ```
+________                       ______ _______________
+__  ___/__________________________  /____  ____/__  /________      __
+_____ \___  __ \  _ \  _ \  ___/_  __ \_  /_   __  /_  __ \_ | /| / /
+____/ /__  /_/ /  __/  __/ /__ _  / / /  __/   _  / / /_/ /_ |/ |/ /
+/____/ _  .___/\___/\___/\___/ /_/ /_//_/      /_/  \____/____/|__/
+       /_/
+SpeechFlow 0.1.0
+Powered by faster-whisper 1.2.1
+
 2026-10-05 14:32:02.590 INFO    Cargando medium (int8, GPU)...
 2026-10-05 14:32:07.412 INFO    Modelo: medium | idioma: es | compute_type: int8 | GPU
 2026-10-05 14:32:07.412 INFO    Modelo cargado en 4.82 s (incluye calentamiento)
