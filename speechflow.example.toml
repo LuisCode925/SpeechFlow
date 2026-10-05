@@ -12,6 +12,7 @@
 
 [audio]
 # device = "Realtek"     # índice (entero) o parte del nombre; sin definir: el que contenga "Realtek", si no el del sistema
+# watch_interval = 3.0   # segundos entre comprobaciones de que el micrófono sigue conectado; mínimo 1.0
 
 [recording]
 # min_seconds = 0.5      # por debajo no se transcribe ni se escribe nada

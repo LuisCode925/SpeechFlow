@@ -27,6 +27,7 @@ class Config:
     device: int | str | None = None
     min_seconds: float = 0.5
     max_seconds: float = 60.0
+    watch_interval: float = 3.0
     notifications: bool = True
 
 
@@ -38,7 +39,7 @@ class ConfigError(Exception):
 _SCHEMA: dict[str, dict[str, tuple[tuple[type, ...], str]]] = {
     "model": {"name": ((str,), "model"), "language": ((str,), "language")},
     "keys": {"record": ((str,), "key"), "switch": ((str,), "switch_key")},
-    "audio": {"device": ((int, str), "device")},
+    "audio": {"device": ((int, str), "device"), "watch_interval": ((int, float), "watch_interval")},
     "recording": {"min_seconds": ((int, float), "min_seconds"), "max_seconds": ((int, float), "max_seconds")},
     "notifications": {"enabled": ((bool,), "notifications")},
 }
@@ -83,7 +84,7 @@ def load_config(path: Path) -> Config:
             if not isinstance(value, types) or (isinstance(value, bool) and bool not in types):
                 names = " o ".join(t.__name__ for t in types)
                 raise ConfigError(f"{section}.{key} debe ser {names}, no {type(value).__name__}")
-            values[field] = float(value) if field in ("min_seconds", "max_seconds") else value
+            values[field] = float(value) if field in ("min_seconds", "max_seconds", "watch_interval") else value
 
     config = Config(**values)
     if config.min_seconds <= 0:
@@ -92,6 +93,8 @@ def load_config(path: Path) -> Config:
         raise ConfigError(
             f"recording.max_seconds ({config.max_seconds}) debe ser mayor que min_seconds ({config.min_seconds})"
         )
+    if config.watch_interval < 1.0:
+        raise ConfigError(f"audio.watch_interval debe ser al menos 1.0, no {config.watch_interval}")
     return config
 
 
@@ -110,6 +113,7 @@ def _emergency_template() -> str:
         "\n"
         "[audio]\n"
         '# device = "Realtek"  # índice (entero) o parte del nombre; sin definir se usa la entrada por defecto\n'
+        f"watch_interval = {d.watch_interval}  # segundos entre comprobaciones del micrófono; mínimo 1.0\n"
         "\n"
         "[recording]\n"
         f"min_seconds = {d.min_seconds}\n"
