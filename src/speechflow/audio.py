@@ -35,6 +35,42 @@ def default_device() -> int | None:
     return None
 
 
+def input_devices() -> list[int]:
+    """Índices de los dispositivos con entrada, en orden."""
+    return [index for index, device in enumerate(sd.query_devices()) if device["max_input_channels"] > 0]
+
+
+def refresh_devices() -> None:
+    """Reinicializa PortAudio para ver dispositivos conectados o desconectados. Solo sin streams abiertos."""
+    sd._terminate()
+    sd._initialize()
+
+
+def device_index(device: int | str | None) -> int | None:
+    """Índice real de un dispositivo de entrada (entero, nombre o None = defecto); None si no se resuelve."""
+    try:
+        info = sd.query_devices(device, "input")
+    except (sd.PortAudioError, ValueError):
+        return None
+    index = info.get("index")
+    if index is None:
+        index = device if isinstance(device, int) else next(
+            (i for i, candidate in enumerate(sd.query_devices()) if candidate["name"] == info["name"]), None
+        )
+    return index
+
+
+def next_input_device(current: int | str | None) -> int | None:
+    """Siguiente dispositivo de entrada tras `current`, con vuelta al principio; None si no hay ninguno."""
+    devices = input_devices()
+    if not devices:
+        return None
+    index = device_index(current)
+    if index not in devices:
+        return devices[0]
+    return devices[(devices.index(index) + 1) % len(devices)]
+
+
 def resample(audio: np.ndarray, source_rate: int) -> np.ndarray:
     """Remuestrea int16 mono de `source_rate` a SAMPLE_RATE."""
     if source_rate == SAMPLE_RATE:
