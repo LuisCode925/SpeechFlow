@@ -1,6 +1,6 @@
 # SPEC 07 — Log de consola verboso en push-to-talk
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 05, SPEC 06
 > **Fecha:** 2026-10-05
 > **Objetivo:** Hacer que cada línea de consola de `push_to_talk.py` lleve fecha, hora con milisegundos y nivel, y que el arranque y cada dictado muestren el modelo, el idioma, el dispositivo de audio y las duraciones, mediante un módulo `logging` propio.
@@ -70,7 +70,7 @@ Convenciones:
 
 ## Plan de implementación
 
-1. Crear `src/speechflow/log.py` con `setup_logging()`: dos manejadores (stdout con filtro `levelno < WARNING`, stderr con nivel `WARNING`), un solo `Formatter`, sin propagación al logger raíz e idempotente. Verificar: `python -c "import sys; sys.path.insert(0, 'src'); from speechflow.log import setup_logging; l = setup_logging(); setup_logging(); l.info('a'); l.error('b')"` imprime dos líneas con el formato esperado, una en stdout y otra en stderr, cada una una sola vez.
+1. Crear `src/speechflow/log.py` con `setup_logging()`: dos manejadores (stdout con filtro `levelno < WARNING`, stderr con nivel `WARNING`), un solo `Formatter`, sin propagación al logger raíz e idempotente. Verificar: `python -c "import sys; sys.path.insert(0, 'src'); from speechflow.log import setup_logging; l = setup_logging(); setup_logging(); l.info('a'); l.error('b')"` imprime1, 2, 3, grabando 1, 2, 3Todo bien, todo correcto, y yo que me alegro. dos líneas con el formato esperado, una en stdout y otra en stderr, cada una una sola vez.
 2. En `scripts/push_to_talk.py`, llamar a `setup_logging()` al inicio de `main()` y sustituir los `print` y `sys.exit(mensaje)` del arranque (xdotool, sesión, `notify-send`, `--key`, dispositivo) por `logger.warning` / `logger.error` + `sys.exit(1)`, sin cambiar sus textos. Verificar: `--key tecla_falsa` imprime una línea `ERROR` con prefijo en stderr y sale con código 1; sin `xdotool` (simulado con `PATH`) sale con el mensaje `sudo apt install xdotool`.
 3. Añadir el banner de arranque: medir el tiempo de `Transcriber(...)` con `time.perf_counter`, consultar el dispositivo con `sd.query_devices` e imprimir las cuatro líneas `INFO`. Verificar: arrancar el script muestra el banner con modelo, idioma, `compute_type`, tiempo de carga y dispositivo, cada línea con marca de tiempo.
 4. Pasar `model_name` a `PushToTalk` y migrar los mensajes del ciclo (grabando, terminada, descartada, límite, insertado, sin texto, errores) al logger con los textos del alcance. Verificar: un dictado completo muestra `Grabando...`, `Grabación terminada: ... con medium/es...` e `Insertado (... caracteres, medium/es): ...`; un toque corto muestra el mensaje de descartada.

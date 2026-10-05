@@ -91,11 +91,12 @@ print(f"{seconds:.2f} s: {text}")
 - **Liberación:** `close()` suelta la referencia al modelo y fuerza la recolección de basura para liberar la GPU. Es idempotente; no se debe llamar a `transcribe()` después.
 - `scripts/capture_mic.py` usa este módulo.
 
-## Módulos de captura, inserción y notificación
+## Módulos de captura, inserción, notificación y log
 
 - `src/speechflow/audio.py`: dispositivos de entrada, remuestreo, medición, guardado de WAV y `Recorder` (`start()` / `stop()`), que graba a la tasa nativa del dispositivo y devuelve `int16` mono a 16 kHz. Lo usan `capture_mic.py` y `push_to_talk.py`.
 - `src/speechflow/inserter.py`: `insert_text(text)` escribe el texto en la ventana con foco con `xdotool type --clearmodifiers`.
 - `src/speechflow/notifier.py`: `notify(title, body)` envía una notificación de escritorio con `notify-send`; si no está instalado, no hace nada.
+- `src/speechflow/log.py`: `setup_logging()` configura el logger `speechflow` con el formato `AAAA-MM-DD HH:MM:SS.mmm NIVEL mensaje` (hora local). Las líneas `INFO` salen por stdout y las `WARNING` y `ERROR` por stderr. Es idempotente. Por ahora solo lo usa `push_to_talk.py`.
 
 ## Push-to-talk
 
@@ -111,12 +112,19 @@ python scripts/push_to_talk.py --device 6 --model small --language en
 Salida de ejemplo:
 
 ```
-Cargando medium (int8, GPU)...
-Listo. Mantén pulsada la tecla 'ctrl_r' para dictar. Ctrl+C para salir.
-Grabando...
-Grabación terminada: 11.18 s. Transcribiendo...
-Insertado (1.03 s): El juego de la pelota prehispánico, que se practicaba a lo largo del territorio...
+2026-10-05 14:32:02.590 INFO    Cargando medium (int8, GPU)...
+2026-10-05 14:32:07.412 INFO    Modelo: medium | idioma: es | compute_type: int8 | GPU
+2026-10-05 14:32:07.412 INFO    Modelo cargado en 4.82 s (incluye calentamiento)
+2026-10-05 14:32:07.413 INFO    Dispositivo de audio: [9] Realtek Audio USB: Audio (hw:3,0) | 44100 Hz nativos a 16000 Hz mono
+2026-10-05 14:32:07.413 INFO    Listo. Mantén pulsada la tecla 'ctrl_r' para dictar. Ctrl+C para salir.
+2026-10-05 14:32:15.208 INFO    Grabando...
+2026-10-05 14:32:26.391 INFO    Grabación terminada: 11.18 s. Transcribiendo con medium/es...
+2026-10-05 14:32:27.421 INFO    Insertado (1.03 s, 0.09x tiempo real, 112 caracteres, medium/es): El juego de la pelota prehispánico, que se practicaba a lo largo del territorio...
+2026-10-05 14:32:40.105 INFO    Saliendo.
+2026-10-05 14:32:40.160 INFO    Modelo medium liberado.
 ```
+
+Cada línea lleva fecha, hora con milisegundos y nivel. Los avisos (`WARNING`) y errores (`ERROR`) salen por stderr, el resto por stdout; el aviso de estado de PortAudio de `audio.py` sale sin prefijo.
 
 Opciones:
 
@@ -132,9 +140,9 @@ Opciones:
 - **Grabaciones cortas:** las de menos de 0.5 s se descartan sin invocar al modelo (evita escribir texto basura por toques accidentales).
 - **Límite:** a los 60 s la grabación se corta sola, se transcribe lo grabado y se avisa. No empieza otra hasta soltar la tecla y volver a pulsarla.
 - **Durante la transcripción:** pulsar la tecla no inicia otra grabación.
-- **Avisos:** todo se muestra por consola. Como notificación de escritorio solo salen el ciclo de vida del modelo (`Cargando {modelo}...`, `Modelo {modelo} cargado`, `Modelo liberado`) y los errores (micrófono, transcripción o inserción). Dictar no genera notificaciones. Si falta `notify-send`, se avisa una vez y sigue funcionando solo con consola.
-- **Salida:** `Ctrl+C` libera el modelo con `Transcriber.close()` (suelta la GPU antes de terminar el proceso) y notifica `Modelo liberado`.
-- **Requisitos:** sesión X11 y `xdotool` instalado; si falta, el script sale al arrancar indicando `sudo apt install xdotool`.
+- **Avisos:** todo se muestra por consola con prefijo de fecha, hora y nivel. Como notificación de escritorio solo salen el ciclo de vida del modelo (`Cargando {modelo}...`, `Modelo {modelo} cargado`, `Modelo liberado`) y los errores (micrófono, transcripción o inserción). Dictar no genera notificaciones. Si falta `notify-send`, se avisa una vez y sigue funcionando solo con consola.
+- **Salida:** `Ctrl+C` libera el modelo con `Transcriber.close()` (suelta la GPU antes de terminar el proceso) y notifica `Modelo liberado`; la consola muestra `Saliendo.` y `Modelo {modelo} liberado.`.
+- **Requisitos:** sesión X11 y `xdotool` instalado; si falta, el script sale al arrancar con código 1 y una línea `ERROR` indicando `sudo apt install xdotool`. Los errores de arranque (`--key` o `--device` inválidos) también terminan con código 1.
 - **Foco:** el texto se escribe en la ventana que tenga el foco cuando termina la transcripción. Si cambias de ventana mientras se transcribe, se escribirá en la nueva.
 - **Una sola instancia:** no ejecutes dos a la vez; ambas reaccionarían a la misma tecla y competirían por el micrófono.
 
