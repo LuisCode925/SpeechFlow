@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 import sounddevice as sd
 from pynput import keyboard
 
-from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, list_devices, parse_device
+from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, device_index, list_devices, parse_device
 from speechflow.inserter import insert_text
 from speechflow.log import LOGGER_NAME, setup_logging
 from speechflow.notifier import notify
@@ -128,11 +128,9 @@ def parse_key(name: str) -> keyboard.Key | keyboard.KeyCode:
 def describe_device(device: int | str | None) -> str:
     """Texto `[índice] nombre | tasa Hz nativos a SAMPLE_RATE Hz mono` del dispositivo de entrada."""
     info = sd.query_devices(device, "input")
-    index = info.get("index")
+    index = device_index(device)
     if index is None:
-        index = device if isinstance(device, int) else next(
-            (i for i, candidate in enumerate(sd.query_devices()) if candidate["name"] == info["name"]), "?"
-        )
+        index = "?"
     return f"[{index}] {info['name']} | {int(info['default_samplerate'])} Hz nativos a {SAMPLE_RATE} Hz mono"
 
 
