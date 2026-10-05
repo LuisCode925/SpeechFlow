@@ -63,7 +63,6 @@ class PushToTalk:
             self._timer.daemon = True
             self._timer.start()
         print("Grabando...")
-        notify("SpeechFlow", "Grabando...")
 
     def on_release(self, key) -> None:
         if key != self.key:
@@ -89,9 +88,7 @@ class PushToTalk:
             self.state = State.TRANSCRIBING
         if timed_out:
             print(f"Límite de {MAX_SECONDS:.0f} s alcanzado; suelta la tecla y vuelve a pulsarla para otro dictado.")
-            notify("SpeechFlow", f"Límite de {MAX_SECONDS:.0f} s alcanzado")
         print(f"Grabación terminada: {seconds:.2f} s. Transcribiendo...")
-        notify("SpeechFlow", "Transcribiendo...")
         threading.Thread(target=self._transcribe_and_insert, args=(audio,), daemon=True).start()
 
     def _transcribe_and_insert(self, audio) -> None:
@@ -99,11 +96,9 @@ class PushToTalk:
             text, seconds = self.transcriber.transcribe(audio)
             if not text:
                 print("Sin texto reconocido.")
-                notify("SpeechFlow", "Sin texto reconocido")
                 return
             insert_text(text)
             print(f"Insertado ({seconds:.2f} s): {text}")
-            notify("SpeechFlow", f"Texto insertado: {text}")
         except Exception as error:
             print(f"Error: {error}", file=sys.stderr)
             notify("SpeechFlow", f"Error: {error}")
