@@ -54,3 +54,11 @@ Ideas recogidas de la sección "Lo que **no** está en esta spec" de las SPEC 01
 - [ ] Empaquetado (`pyproject.toml`) y `python -m speechflow` (SPEC 04, 05).
 - [ ] Tests con `pytest` (SPEC 04, 05).
 
+## Verificación manual pendiente (SPEC 11)
+
+Comprobaciones con hardware real que no aparecieron en el log de la prueba del vigilante; se cierran en la verificación final de los criterios de aceptación.
+
+- [ ] Con el micrófono ausente, pulsar la tecla de grabar muestra solo el `WARNING` `El micrófono seleccionado no está conectado ...`, sin abrir stream ni cambiar el estado.
+- [ ] Con el micrófono ausente, la tecla de cambio (`f8`) pasa a otro dispositivo y el vigilante sigue sobre el nuevo.
+- [ ] Las notificaciones de escritorio `Micrófono desconectado: ...` y `Micrófono reconectado: ...` aparecen al desconectar y reconectar el micrófono.
+
