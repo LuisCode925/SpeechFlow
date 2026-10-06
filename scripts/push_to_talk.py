@@ -283,6 +283,20 @@ class PushToTalk:
                 self.state = State.IDLE
                 self._arm_idle_timer()
 
+    def shutdown(self) -> bool:
+        """Cancela el temporizador, espera a una recarga en curso y libera el modelo. True si había uno cargado."""
+        with self._lock:
+            self._cancel_idle_timer()
+            loader = self._loader
+        if loader is not None:
+            loader.join()  # fuera del lock: la carga lo necesita para publicar el modelo
+        with self._lock:
+            transcriber, self.transcriber = self.transcriber, None
+        if transcriber is None:
+            return False
+        transcriber.close()
+        return True
+
     def _cancel_idle_timer(self) -> None:
         """Cancela el temporizador de inactividad; llamar con el lock tomado."""
         if self._idle_timer is not None:
@@ -455,9 +469,9 @@ def main() -> None:
     except KeyboardInterrupt:
         logger.info("Saliendo.")
         push_to_talk.stop_watcher()
-        transcriber.close()
-        logger.info(f"Modelo {model} liberado.")
-        notify("SpeechFlow", "Modelo liberado")
+        if push_to_talk.shutdown():
+            logger.info(f"Modelo {model} liberado.")
+            notify("SpeechFlow", "Modelo liberado")
 
 
 if __name__ == "__main__":
