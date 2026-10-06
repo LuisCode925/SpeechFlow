@@ -31,7 +31,7 @@ Ideas recogidas de la sección "Lo que **no** está en esta spec" de las SPEC 01
 
 - [ ] Bandeja del sistema (SPEC 01, 03, 04, 05).
 - [ ] Daemon, arranque automático y `systemd` (SPEC 03, 04, 05).
-- [ ] Descarga del modelo por inactividad y recarga bajo demanda (SPEC 06).
+- [x] ~~Descarga del modelo por inactividad y recarga bajo demanda (SPEC 06).~~ (SPEC 12)
 - [ ] Esperar a una transcripción en curso al salir (SPEC 06).
 - [ ] Liberar el modelo en señales distintas de `Ctrl+C` (SPEC 06).
 

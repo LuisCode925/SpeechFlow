@@ -141,6 +141,16 @@ Powered by faster-whisper 1.2.1
 2026-10-05 14:32:40.160 INFO    Modelo medium liberado.
 ```
 
+Con `[model] idle_timeout = 600`, tras 10 minutos sin dictar y al pulsar de nuevo la tecla:
+
+```
+2026-10-05 14:42:27.421 INFO    Modelo medium liberado por inactividad (600 s sin uso).
+2026-10-05 14:55:03.100 INFO    Grabando...
+2026-10-05 14:55:03.101 INFO    Modelo descargado: se carga medium mientras grabas.
+2026-10-05 14:55:03.102 INFO    Cargando medium (int8, GPU)...
+2026-10-05 14:55:07.930 INFO    Modelo cargado en 4.83 s (incluye calentamiento)
+```
+
 Cada línea lleva fecha, hora con milisegundos y nivel. Los avisos (`WARNING`) y errores (`ERROR`) salen por stderr, el resto por stdout; el aviso de estado de PortAudio de `audio.py` sale sin prefijo.
 
 Opciones:
@@ -157,14 +167,16 @@ Opciones:
 
 Un argumento escrito en la línea de comandos gana sobre el archivo de configuración (ver [Configuración](#configuración)).
 
-- **Modelo:** se carga una sola vez al arrancar, así que cada dictado responde rápido. Con `medium` int8 en la GTX 1060, ~11 s de audio tardaron 1.03 s.
+- **Modelo:** se carga al arrancar, así que cada dictado responde rápido. Con `medium` int8 en la GTX 1060, ~11 s de audio tardaron 1.03 s. Con `[model] idle_timeout` desactivado (`0`, el defecto) no se vuelve a cargar.
+- **Descarga por inactividad:** con `[model] idle_timeout = N` (`N` ≥ 30; `0` desactiva), tras `N` segundos en reposo sin dictar el modelo se libera de la GPU y se registra `Modelo {modelo} liberado por inactividad ({N} s sin uso).`. La cuenta empieza cada vez que el script vuelve a reposo: tras una transcripción, tras una grabación descartada por corta o tras una recarga fallida. No se libera mientras se graba ni se transcribe. No envía notificación de escritorio. Si `close()` no devuelve toda la VRAM (la caché de CUDA puede retener algo), esa memoria sigue ocupada hasta salir del proceso.
+- **Recarga bajo demanda:** con el modelo descargado, pulsar la tecla de grabar abre el micrófono, empieza a grabar al instante y carga el modelo en paralelo (`Modelo descargado: se carga {modelo} mientras grabas.`, `Cargando ...`, `Modelo cargado en ...`). Al soltar, la transcripción espera a que acabe la carga y no se pierde nada de lo dictado. Si el micrófono falla al abrir, no se carga nada. Si la recarga falla, se registra `Error al recargar el modelo: ...`, se envía una notificación de error, se descarta el audio y la siguiente pulsación reintenta. La recarga con éxito no notifica.
 - **Grabaciones cortas:** las de menos de 0.5 s (`[recording] min_seconds`) se descartan sin invocar al modelo (evita escribir texto basura por toques accidentales).
 - **Límite:** a los 60 s (`[recording] max_seconds`) la grabación se corta sola, se transcribe lo grabado y se avisa. No empieza otra hasta soltar la tecla y volver a pulsarla.
 - **Durante la transcripción:** pulsar la tecla no inicia otra grabación.
-- **Avisos:** todo se muestra por consola con prefijo de fecha, hora y nivel. Como notificación de escritorio solo salen el ciclo de vida del modelo (`Cargando {modelo}...`, `Modelo {modelo} cargado`, `Modelo liberado`), los errores (micrófono, transcripción o inserción) el cambio de entrada de audio (`Entrada de audio: {nombre}`) y las alertas del micrófono (`Micrófono desconectado: {nombre}`, `Micrófono reconectado: {nombre}` y, al arrancar, `Micrófono guardado no disponible: {nombre}`). Dictar no genera notificaciones. Si falta `notify-send`, se avisa una vez y sigue funcionando solo con consola. Con `[notifications] enabled = false` no sale ninguna notificación y ese aviso tampoco.
+- **Avisos:** todo se muestra por consola con prefijo de fecha, hora y nivel. Como notificación de escritorio solo salen el ciclo de vida del modelo en el arranque y la salida (`Cargando {modelo}...`, `Modelo {modelo} cargado`, `Modelo liberado`), los errores (micrófono, transcripción, inserción o recarga del modelo) el cambio de entrada de audio (`Entrada de audio: {nombre}`) y las alertas del micrófono (`Micrófono desconectado: {nombre}`, `Micrófono reconectado: {nombre}` y, al arrancar, `Micrófono guardado no disponible: {nombre}`). Dictar no genera notificaciones. Si falta `notify-send`, se avisa una vez y sigue funcionando solo con consola. Con `[notifications] enabled = false` no sale ninguna notificación y ese aviso tampoco.
 - **Cambio de entrada en caliente:** pulsar `--switch-key` (`f8`) pasa al siguiente dispositivo de entrada, en orden de índice y con vuelta al principio, sin recargar el modelo. Cada pulsación relee la lista de dispositivos, así que un micrófono conectado o desconectado con el script en marcha se tiene en cuenta. La rotación incluye todo lo que muestra `--list-devices` (también los `Loopback`; si el elegido no abre, el error sale al dictar y basta pulsar la tecla otra vez). Solo cambia en reposo: durante la grabación o la transcripción se registra un `WARNING` y no pasa nada. Con un único dispositivo se registra `Solo hay un dispositivo de entrada: ...` sin notificación. Un cambio efectivo guarda el nombre del dispositivo en `.speechflow-state.toml`, y al reiniciar se usa ese micrófono (ver [Configuración](#configuración)).
 - **Vigilancia del micrófono:** un hilo comprueba cada `[audio] watch_interval` segundos (defecto 3, mínimo 1) que el micrófono seleccionado sigue conectado; lo identifica por nombre, porque los índices cambian al releer los dispositivos. En reposo relee los dispositivos (`refresh_devices()`) bajo el mismo bloqueo que las teclas, así que una pulsación puede esperar unos instantes. Al desconectarse registra un `WARNING` (`El micrófono seleccionado se desconectó: ...`) y envía una notificación, una sola vez. Mientras está desconectado, la tecla de grabar solo muestra un `WARNING` y no graba; reconectarlo o pulsar `--switch-key` lo resuelve. Al reconectarse registra `Micrófono reconectado: ...`, notifica y vuelve a usarlo sin pulsar nada. Si cae durante una grabación (no relee dispositivos en ese caso, solo comprueba que el stream siga activo), registra `...se desconectó durante la grabación: ...`, detiene la grabación y transcribe lo capturado si dura al menos `min_seconds`. PortAudio puede imprimir por stderr líneas `Expression 'alsa_snd_pcm_...' failed` en ese momento; no pasan por el log. No cambia solo de micrófono.
-- **Salida:** `Ctrl+C` libera el modelo con `Transcriber.close()` (suelta la GPU antes de terminar el proceso) y notifica `Modelo liberado`; la consola muestra `Saliendo.` y `Modelo {modelo} liberado.`.
+- **Salida:** `Ctrl+C` espera a una recarga en curso, libera el modelo con `Transcriber.close()` (suelta la GPU antes de terminar el proceso) y notifica `Modelo liberado`; la consola muestra `Saliendo.` y `Modelo {modelo} liberado.`. Si el modelo ya estaba descargado por inactividad, solo muestra `Saliendo.`.
 - **Requisitos:** sesión X11 y `xdotool` instalado; si falta, el script sale al arrancar con código 1 y una línea `ERROR` indicando `sudo apt install xdotool`. Los errores de arranque (`--key`, `--switch-key` o `--device` inválidos, o `--switch-key` igual a `--key`) también terminan con código 1.
 - **Foco:** el texto se escribe en la ventana que tenga el foco cuando termina la transcripción. Si cambias de ventana mientras se transcribe, se escribirá en la nueva.
 - **Una sola instancia:** no ejecutes dos a la vez; ambas reaccionarían a la misma tecla y competirían por el micrófono.
@@ -183,6 +195,7 @@ Un argumento escrito en la línea de comandos gana sobre el archivo de configura
 [model]
 name = "medium"
 language = "es"
+idle_timeout = 0.0          # segundos sin dictar antes de liberar el modelo de la GPU; 0 desactiva; mínimo 30.0
 
 [keys]
 record = "ctrl_r"
@@ -202,7 +215,7 @@ enabled = true
 
 **Precedencia por valor:** argumento de CLI (solo si se escribió) > micrófono guardado (solo el dispositivo) > archivo > defectos. En concreto, el dispositivo es `--device` > `.speechflow-state.toml` > `[audio] device` > el que contenga "Realtek", si no el del sistema.
 
-**Validación:** una clave o sección desconocida, un tipo incorrecto, `min_seconds <= 0` o `max_seconds <= min_seconds` o `watch_interval < 1.0` hacen inválido el archivo. Las teclas se siguen validando al arrancar con los mismos mensajes `ERROR` de `--key` y `--switch-key`.
+**Validación:** una clave o sección desconocida, un tipo incorrecto, `min_seconds <= 0` o `max_seconds <= min_seconds` o `watch_interval < 1.0`, o un `idle_timeout` distinto de 0 y menor que 30.0 hacen inválido el archivo. Las teclas se siguen validando al arrancar con los mismos mensajes `ERROR` de `--key` y `--switch-key`.
 
 **Archivo de emergencia:** si no se encuentra ningún archivo, o el encontrado no se puede leer o no es válido, el script registra un `WARNING` con la causa, crea `speechflow.emergency.toml` en la raíz del repo con todos los valores por defecto (sin sobrescribirlo si ya existe) y sigue con los defectos. El archivo inválido del usuario no se toca. La plantilla de emergencia no se lee nunca: cópiala o renómbrala a `speechflow.toml` para usarla.
 

@@ -1,6 +1,6 @@
 # SPEC 12 — Descarga del modelo por inactividad y recarga bajo demanda
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 04, SPEC 05, SPEC 06, SPEC 07, SPEC 10, SPEC 11
 > **Fecha:** 2026-10-06
 > **Objetivo:** Liberar el modelo de la GPU en `push_to_talk.py` tras `[model] idle_timeout` segundos sin uso y recargarlo al pulsar la tecla de grabar, sin perder lo que el usuario dicte durante la carga.

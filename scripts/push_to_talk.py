@@ -7,6 +7,8 @@ cambia en caliente al siguiente dispositivo de entrada, solo con el script en re
 muestra un banner ASCII con las versiones de SpeechFlow y faster-whisper antes de cargar el modelo.
 Un hilo vigilante avisa por log y notificación cuando el micrófono seleccionado se desconecta o se
 reconecta (`[audio] watch_interval`, 3 s por defecto); no cambia de micrófono por su cuenta.
+Con `[model] idle_timeout` distinto de 0 (mínimo 30 s) libera el modelo de la GPU tras ese tiempo
+en reposo; al pulsar la tecla graba al instante y recarga el modelo en paralelo.
 
 Las opciones (modelo, idioma, teclas, dispositivo, límites de grabación y notificaciones) se pueden
 fijar en un archivo TOML: `--config RUTA`, si no `speechflow.toml` en la raíz del repo, si no
