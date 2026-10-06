@@ -341,6 +341,7 @@ def main() -> None:
             sd.query_devices(saved, "input")
         except (sd.PortAudioError, ValueError):
             logger.warning(f"El dispositivo guardado {saved!r} no está disponible; se usa {fallback_label}.")
+            notify("SpeechFlow", f"Micrófono guardado no disponible: {saved}")
             saved = None
     if args.device is not None:
         device = args.device
