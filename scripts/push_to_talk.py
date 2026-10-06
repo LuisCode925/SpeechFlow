@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 import sounddevice as sd
 from pynput import keyboard
 
-from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, device_index, list_devices, next_input_device, parse_device, refresh_devices
+from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, device_index, device_name, input_device_by_name, list_devices, next_input_device, parse_device, refresh_devices
 from speechflow.config import CONFIG_FILENAME, REPO_ROOT, STATE_FILENAME, USER_CONFIG_PATH, Config, ConfigError, find_config, load_config, load_state_device, save_state_device, write_emergency
 from speechflow.inserter import insert_text
 from speechflow.log import LOGGER_NAME, log_banner, setup_logging
@@ -69,6 +69,9 @@ class PushToTalk:
         self._switch_held = False  # ídem para la tecla de cambio
         self._timer: threading.Timer | None = None
         self._lock = threading.Lock()
+        self._watched_name = device_name(device)  # micrófono vigilado, por nombre (los índices cambian al refrescar)
+        self._device_missing = False  # True entre la alerta de desconexión y la reconexión
+        self._stop_watcher = threading.Event()
 
     def on_press(self, key) -> None:
         if key == self.switch_key:
@@ -136,6 +139,36 @@ class PushToTalk:
                 save_state_device(name)
             except OSError as error:
                 logger.warning(f"No se pudo guardar la entrada de audio en {STATE_FILENAME}: {error}")
+
+    def start_watcher(self, interval: float) -> None:
+        """Lanza el hilo que comprueba cada `interval` s que el micrófono seleccionado sigue conectado."""
+        threading.Thread(target=self._watch, args=(interval,), daemon=True).start()
+
+    def stop_watcher(self) -> None:
+        self._stop_watcher.set()
+
+    def _watch(self, interval: float) -> None:
+        """Avisa de la desconexión del micrófono; solo refresca PortAudio en IDLE y bajo el lock."""
+        refresh_failed = False
+        while not self._stop_watcher.wait(interval):
+            with self._lock:
+                if self.state is not State.IDLE or self._watched_name is None:
+                    continue
+                try:
+                    refresh_devices()
+                    present = input_device_by_name(self._watched_name) is not None
+                except Exception as error:
+                    if not refresh_failed:
+                        logger.error(f"Error al comprobar el micrófono: {error}")
+                    refresh_failed = True
+                    continue
+                refresh_failed = False
+                if present or self._device_missing:
+                    continue
+                self._device_missing = True
+                name = self._watched_name
+            logger.warning(f"El micrófono seleccionado se desconectó: {name}.")
+            notify("SpeechFlow", f"Micrófono desconectado: {name}")
 
     def _stop_recording(self, timed_out: bool) -> None:
         """Detiene la grabación (al soltar o por el temporizador); descarta lo corto o lanza la transcripción."""
@@ -305,11 +338,13 @@ def main() -> None:
     logger.info(f"Listo. Mantén pulsada la tecla {key_name!r} para dictar. Ctrl+C para salir.")
 
     push_to_talk = PushToTalk(key, switch_key, device, transcriber, model, config.min_seconds, config.max_seconds)
+    push_to_talk.start_watcher(config.watch_interval)
     try:
         with keyboard.Listener(on_press=push_to_talk.on_press, on_release=push_to_talk.on_release) as listener:
             listener.join()
     except KeyboardInterrupt:
         logger.info("Saliendo.")
+        push_to_talk.stop_watcher()
         transcriber.close()
         logger.info(f"Modelo {model} liberado.")
         notify("SpeechFlow", "Modelo liberado")
