@@ -157,28 +157,42 @@ class PushToTalk:
         refresh_failed = False
         while not self._stop_watcher.wait(interval):
             with self._lock:
-                if self.state is not State.IDLE or self._watched_name is None:
+                if self._watched_name is None:
                     continue
-                try:
-                    refresh_devices()
-                    index = input_device_by_name(self._watched_name)
-                except Exception as error:
-                    if not refresh_failed:
-                        logger.error(f"Error al comprobar el micrófono: {error}")
-                    refresh_failed = True
-                    continue
-                refresh_failed = False
-                name = self._watched_name
-                if index is None and not self._device_missing:
+                if self.state is State.RECORDING:
+                    # sin refrescar PortAudio (hay un stream abierto): basta ver si el stream sigue activo
+                    if self.recorder.active:
+                        continue
                     self._device_missing = True
-                    event = "disconnected"
-                elif index is not None and self._device_missing:
-                    self._device_missing = False
-                    self.recorder.device = index  # el índice puede haber cambiado al refrescar
-                    event = "reconnected"
-                else:
+                    name = self._watched_name
+                    event = "lost"
+                elif self.state is not State.IDLE:
                     continue
-            if event == "disconnected":
+                else:
+                    try:
+                        refresh_devices()
+                        index = input_device_by_name(self._watched_name)
+                    except Exception as error:
+                        if not refresh_failed:
+                            logger.error(f"Error al comprobar el micrófono: {error}")
+                        refresh_failed = True
+                        continue
+                    refresh_failed = False
+                    name = self._watched_name
+                    if index is None and not self._device_missing:
+                        self._device_missing = True
+                        event = "disconnected"
+                    elif index is not None and self._device_missing:
+                        self._device_missing = False
+                        self.recorder.device = index  # el índice puede haber cambiado al refrescar
+                        event = "reconnected"
+                    else:
+                        continue
+            if event == "lost":
+                logger.warning(f"El micrófono seleccionado se desconectó durante la grabación: {name}.")
+                notify("SpeechFlow", f"Micrófono desconectado: {name}")
+                self._stop_recording(False)  # fuera del lock: transcribe lo capturado
+            elif event == "disconnected":
                 logger.warning(f"El micrófono seleccionado se desconectó: {name}.")
                 notify("SpeechFlow", f"Micrófono desconectado: {name}")
             else:
