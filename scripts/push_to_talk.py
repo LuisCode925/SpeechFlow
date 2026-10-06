@@ -86,6 +86,9 @@ class PushToTalk:
             was_held, self._held = self._held, True
             if was_held or self.state is not State.IDLE:
                 return
+            if self._device_missing:
+                logger.warning(f"El micrófono seleccionado no está conectado ({self._watched_name}); reconéctalo o pulsa la tecla de cambio para elegir otro.")
+                return
             try:
                 self.recorder.start()
             except (sd.PortAudioError, ValueError) as error:
@@ -128,12 +131,14 @@ class PushToTalk:
             if new_device is None:
                 logger.error(f"No hay dispositivos de entrada disponibles; se mantiene {previous}.")
                 return
-            if new_device == device_index(self.recorder.device):
+            if new_device == device_index(self.recorder.device) and not self._device_missing:
                 logger.info(f"Solo hay un dispositivo de entrada: {describe_device(new_device)}")
                 return
             self.recorder.device = new_device
             logger.info(f"Entrada de audio cambiada: {describe_device(new_device)}")
             name = sd.query_devices(new_device)["name"]
+            self._watched_name = name
+            self._device_missing = False
             notify("SpeechFlow", f"Entrada de audio: {name}")
             try:
                 save_state_device(name)
@@ -156,19 +161,29 @@ class PushToTalk:
                     continue
                 try:
                     refresh_devices()
-                    present = input_device_by_name(self._watched_name) is not None
+                    index = input_device_by_name(self._watched_name)
                 except Exception as error:
                     if not refresh_failed:
                         logger.error(f"Error al comprobar el micrófono: {error}")
                     refresh_failed = True
                     continue
                 refresh_failed = False
-                if present or self._device_missing:
-                    continue
-                self._device_missing = True
                 name = self._watched_name
-            logger.warning(f"El micrófono seleccionado se desconectó: {name}.")
-            notify("SpeechFlow", f"Micrófono desconectado: {name}")
+                if index is None and not self._device_missing:
+                    self._device_missing = True
+                    event = "disconnected"
+                elif index is not None and self._device_missing:
+                    self._device_missing = False
+                    self.recorder.device = index  # el índice puede haber cambiado al refrescar
+                    event = "reconnected"
+                else:
+                    continue
+            if event == "disconnected":
+                logger.warning(f"El micrófono seleccionado se desconectó: {name}.")
+                notify("SpeechFlow", f"Micrófono desconectado: {name}")
+            else:
+                logger.info(f"Micrófono reconectado: {describe_device(index)}")
+                notify("SpeechFlow", f"Micrófono reconectado: {name}")
 
     def _stop_recording(self, timed_out: bool) -> None:
         """Detiene la grabación (al soltar o por el temporizador); descarta lo corto o lanza la transcripción."""
