@@ -245,6 +245,8 @@ class PushToTalk:
         except Exception as error:
             with self._lock:
                 self._load_error = error
+            logger.error(f"Error al recargar el modelo: {error}")
+            notify("SpeechFlow", f"Error al recargar el modelo: {error}")
             return
         with self._lock:
             self.transcriber = transcriber
@@ -261,7 +263,8 @@ class PushToTalk:
                     self._loader = None
                     error = self._load_error
                 if error is not None:
-                    raise error
+                    logger.info("Audio descartado: el modelo no se pudo recargar.")
+                    return  # el finally devuelve el estado a IDLE; la siguiente pulsación reintenta
             with self._lock:
                 transcriber = self.transcriber
             text, seconds = transcriber.transcribe(audio)
