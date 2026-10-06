@@ -71,6 +71,8 @@ class PushToTalk:
         self.transcriber = transcriber  # None = modelo descargado
         self.idle_timeout = idle_timeout  # 0 = no se libera nunca
         self._idle_timer: threading.Timer | None = None
+        self._loader: threading.Thread | None = None  # hilo de recarga en curso
+        self._load_error: Exception | None = None  # fallo de la última recarga
         self.state = State.IDLE
         self._held = False  # la tecla sigue pulsada; filtra las repeticiones automáticas
         self._switch_held = False  # ídem para la tecla de cambio
@@ -105,10 +107,17 @@ class PushToTalk:
                 return
             self.state = State.RECORDING
             self._cancel_idle_timer()
+            reloading = self.transcriber is None and (self._loader is None or not self._loader.is_alive())
+            if reloading:
+                self._load_error = None
+                self._loader = threading.Thread(target=self._load_model, daemon=True)
+                self._loader.start()
             self._timer = threading.Timer(self.max_seconds, self._stop_recording, args=(True,))
             self._timer.daemon = True
             self._timer.start()
         logger.info("Grabando...")
+        if reloading:
+            logger.info(f"Modelo descargado: se carga {self.model_name} mientras grabas.")
 
     def on_release(self, key) -> None:
         if key == self.switch_key:
@@ -229,9 +238,33 @@ class PushToTalk:
         logger.info(f"Grabación terminada: {seconds:.2f} s. Transcribiendo con {self.model_name}/{self.language}...")
         threading.Thread(target=self._transcribe_and_insert, args=(audio,), daemon=True).start()
 
+    def _load_model(self) -> None:
+        """Cuerpo del hilo de recarga: carga el modelo fuera del lock y lo publica, o guarda el error."""
+        try:
+            transcriber = load_transcriber(self.model_name, self.language)
+        except Exception as error:
+            with self._lock:
+                self._load_error = error
+            return
+        with self._lock:
+            self.transcriber = transcriber
+            if self.state is State.IDLE:  # la grabación se descartó mientras cargaba
+                self._arm_idle_timer()
+
     def _transcribe_and_insert(self, audio) -> None:
         try:
-            text, seconds = self.transcriber.transcribe(audio)
+            with self._lock:
+                loader = self._loader
+            if loader is not None:
+                loader.join()  # fuera del lock: la carga lo necesita para publicar el modelo
+                with self._lock:
+                    self._loader = None
+                    error = self._load_error
+                if error is not None:
+                    raise error
+            with self._lock:
+                transcriber = self.transcriber
+            text, seconds = transcriber.transcribe(audio)
             label = f"{self.model_name}/{self.language}"
             if not text:
                 logger.info(f"Sin texto reconocido ({seconds:.2f} s, {label}).")
