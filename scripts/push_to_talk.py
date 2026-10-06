@@ -258,6 +258,15 @@ def describe_device(device: int | str | None) -> str:
     return f"[{index}] {info['name']} | {int(info['default_samplerate'])} Hz nativos a {SAMPLE_RATE} Hz mono"
 
 
+def load_transcriber(model: str, language: str) -> Transcriber:
+    """Carga el modelo registrando `Cargando ...` y `Modelo cargado en ...`; no notifica."""
+    logger.info(f"Cargando {model} ({COMPUTE_TYPE}, GPU)...")
+    started = time.perf_counter()
+    transcriber = Transcriber(model, language)
+    logger.info(f"Modelo cargado en {time.perf_counter() - started:.2f} s (incluye calentamiento)")
+    return transcriber
+
+
 def resolve_config(explicit: Path | None) -> Config:
     """Carga la configuración de usuario; si falta o es inválida, avisa, deja la plantilla de emergencia y usa los defectos."""
     if explicit is not None and not explicit.is_file():
@@ -357,14 +366,10 @@ def main() -> None:
         logger.error(f"Error con el dispositivo de entrada {device!r}: {error}")
         sys.exit(1)
 
-    logger.info(f"Cargando {model} ({COMPUTE_TYPE}, GPU)...")
     notify("SpeechFlow", f"Cargando {model}...")
-    started = time.perf_counter()
-    transcriber = Transcriber(model, language)
-    load_seconds = time.perf_counter() - started
+    transcriber = load_transcriber(model, language)
     notify("SpeechFlow", f"Modelo {model} cargado")
     logger.info(f"Modelo: {model} | idioma: {language} | compute_type: {COMPUTE_TYPE} | GPU")
-    logger.info(f"Modelo cargado en {load_seconds:.2f} s (incluye calentamiento)")
     logger.info(f"Dispositivo de audio: {describe_device(device)}")
     logger.info(f"Cambio de entrada de audio: tecla {switch_key_name!r}.")
     logger.info(f"Listo. Mantén pulsada la tecla {key_name!r} para dictar. Ctrl+C para salir.")
