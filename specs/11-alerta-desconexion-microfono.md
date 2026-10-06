@@ -1,6 +1,6 @@
 # SPEC 11 — Alerta de desconexión del micrófono
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 05, SPEC 06, SPEC 07, SPEC 08, SPEC 10
 > **Fecha:** 2026-10-05
 > **Objetivo:** Avisar por log y notificación de escritorio cuando el micrófono seleccionado de `push_to_talk.py` se desconecta (o se reconecta), mediante un hilo vigilante que comprueba el dispositivo cada `[audio] watch_interval` segundos.

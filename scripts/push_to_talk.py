@@ -5,6 +5,8 @@ resultado en la ventana con foco. Termina con Ctrl+C. `--list-devices` muestra l
 dispositivos de entrada disponibles. Una segunda tecla global (`--switch-key`, f8 por defecto)
 cambia en caliente al siguiente dispositivo de entrada, solo con el script en reposo. El arranque
 muestra un banner ASCII con las versiones de SpeechFlow y faster-whisper antes de cargar el modelo.
+Un hilo vigilante avisa por log y notificación cuando el micrófono seleccionado se desconecta o se
+reconecta (`[audio] watch_interval`, 3 s por defecto); no cambia de micrófono por su cuenta.
 
 Las opciones (modelo, idioma, teclas, dispositivo, límites de grabación y notificaciones) se pueden
 fijar en un archivo TOML: `--config RUTA`, si no `speechflow.toml` en la raíz del repo, si no
