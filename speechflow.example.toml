@@ -5,6 +5,7 @@
 [model]
 # name = "medium"
 # language = "es"
+# idle_timeout = 0.0     # segundos sin dictar antes de liberar el modelo de la GPU; 0 desactiva; mínimo 30.0
 
 [keys]
 # record = "ctrl_r"      # nombre de pynput.keyboard.Key (ctrl_r, f9, ...) o un carácter suelto

@@ -29,6 +29,7 @@ class Config:
     max_seconds: float = 60.0
     watch_interval: float = 3.0
     notifications: bool = True
+    idle_timeout: float = 0.0  # [model] idle_timeout, en segundos; 0 = desactivado
 
 
 class ConfigError(Exception):
@@ -37,7 +38,11 @@ class ConfigError(Exception):
 
 # sección -> clave -> (tipos admitidos, campo de Config)
 _SCHEMA: dict[str, dict[str, tuple[tuple[type, ...], str]]] = {
-    "model": {"name": ((str,), "model"), "language": ((str,), "language")},
+    "model": {
+        "name": ((str,), "model"),
+        "language": ((str,), "language"),
+        "idle_timeout": ((int, float), "idle_timeout"),
+    },
     "keys": {"record": ((str,), "key"), "switch": ((str,), "switch_key")},
     "audio": {"device": ((int, str), "device"), "watch_interval": ((int, float), "watch_interval")},
     "recording": {"min_seconds": ((int, float), "min_seconds"), "max_seconds": ((int, float), "max_seconds")},
@@ -84,7 +89,7 @@ def load_config(path: Path) -> Config:
             if not isinstance(value, types) or (isinstance(value, bool) and bool not in types):
                 names = " o ".join(t.__name__ for t in types)
                 raise ConfigError(f"{section}.{key} debe ser {names}, no {type(value).__name__}")
-            values[field] = float(value) if field in ("min_seconds", "max_seconds", "watch_interval") else value
+            values[field] = float(value) if field in ("min_seconds", "max_seconds", "watch_interval", "idle_timeout") else value
 
     config = Config(**values)
     if config.min_seconds <= 0:
@@ -95,6 +100,8 @@ def load_config(path: Path) -> Config:
         )
     if config.watch_interval < 1.0:
         raise ConfigError(f"audio.watch_interval debe ser al menos 1.0, no {config.watch_interval}")
+    if config.idle_timeout != 0 and config.idle_timeout < 30.0:
+        raise ConfigError(f"model.idle_timeout debe ser 0 o al menos 30.0, no {config.idle_timeout}")
     return config
 
 
@@ -106,6 +113,7 @@ def _emergency_template() -> str:
         "[model]\n"
         f"name = {json.dumps(d.model)}\n"
         f"language = {json.dumps(d.language)}\n"
+        f"idle_timeout = {d.idle_timeout}  # segundos sin dictar antes de liberar el modelo; 0 desactiva; mínimo 30.0\n"
         "\n"
         "[keys]\n"
         f"record = {json.dumps(d.key)}\n"
