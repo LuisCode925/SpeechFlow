@@ -54,18 +54,23 @@ class PushToTalk:
         key: keyboard.Key | keyboard.KeyCode,
         switch_key: keyboard.Key | keyboard.KeyCode,
         device: int | str | None,
-        transcriber: Transcriber,
+        transcriber: Transcriber | None,
         model_name: str,
+        language: str,
         min_seconds: float,
         max_seconds: float,
+        idle_timeout: float,
     ) -> None:
         self.key = key
         self.switch_key = switch_key
         self.model_name = model_name
+        self.language = language  # para recargar; antes se leía de transcriber.language
         self.min_seconds = min_seconds  # por debajo no se transcribe ni se escribe nada
         self.max_seconds = max_seconds  # la grabación se corta sola
         self.recorder = Recorder(device)
-        self.transcriber = transcriber
+        self.transcriber = transcriber  # None = modelo descargado
+        self.idle_timeout = idle_timeout  # 0 = no se libera nunca
+        self._idle_timer: threading.Timer | None = None
         self.state = State.IDLE
         self._held = False  # la tecla sigue pulsada; filtra las repeticiones automáticas
         self._switch_held = False  # ídem para la tecla de cambio
@@ -74,6 +79,7 @@ class PushToTalk:
         self._watched_name = device_name(device)  # micrófono vigilado, por nombre (los índices cambian al refrescar)
         self._device_missing = False  # True entre la alerta de desconexión y la reconexión
         self._stop_watcher = threading.Event()
+        self._arm_idle_timer()
 
     def on_press(self, key) -> None:
         if key == self.switch_key:
@@ -98,6 +104,7 @@ class PushToTalk:
                 notify("SpeechFlow", f"Error al abrir el micrófono: {error}")
                 return
             self.state = State.RECORDING
+            self._cancel_idle_timer()
             self._timer = threading.Timer(self.max_seconds, self._stop_recording, args=(True,))
             self._timer.daemon = True
             self._timer.start()
@@ -213,18 +220,19 @@ class PushToTalk:
             seconds = len(audio) / SAMPLE_RATE
             if seconds < self.min_seconds:
                 self.state = State.IDLE
+                self._arm_idle_timer()
                 logger.info(f"Grabación de {seconds:.2f} s descartada (mínimo {self.min_seconds} s).")
                 return
             self.state = State.TRANSCRIBING
         if timed_out:
             logger.warning(f"Límite de {self.max_seconds:g} s alcanzado; suelta la tecla y vuelve a pulsarla para otro dictado.")
-        logger.info(f"Grabación terminada: {seconds:.2f} s. Transcribiendo con {self.model_name}/{self.transcriber.language}...")
+        logger.info(f"Grabación terminada: {seconds:.2f} s. Transcribiendo con {self.model_name}/{self.language}...")
         threading.Thread(target=self._transcribe_and_insert, args=(audio,), daemon=True).start()
 
     def _transcribe_and_insert(self, audio) -> None:
         try:
             text, seconds = self.transcriber.transcribe(audio)
-            label = f"{self.model_name}/{self.transcriber.language}"
+            label = f"{self.model_name}/{self.language}"
             if not text:
                 logger.info(f"Sin texto reconocido ({seconds:.2f} s, {label}).")
                 return
@@ -237,6 +245,35 @@ class PushToTalk:
         finally:
             with self._lock:
                 self.state = State.IDLE
+                self._arm_idle_timer()
+
+    def _cancel_idle_timer(self) -> None:
+        """Cancela el temporizador de inactividad; llamar con el lock tomado."""
+        if self._idle_timer is not None:
+            self._idle_timer.cancel()
+            self._idle_timer = None
+
+    def _arm_idle_timer(self) -> None:
+        """Rearma la cuenta de inactividad; llamar con el lock tomado. No hace nada si idle_timeout == 0 o no hay modelo."""
+        self._cancel_idle_timer()
+        if self.idle_timeout == 0 or self.transcriber is None:
+            return
+        self._idle_timer = threading.Timer(self.idle_timeout, self._unload_model)
+        self._idle_timer.daemon = True
+        self._idle_timer.start()
+
+    def _unload_model(self) -> None:
+        """Callback del temporizador: libera el modelo si sigue en IDLE."""
+        with self._lock:
+            # un temporizador ya cancelado pero en marcha no debe liberar nada: solo vale el vigente
+            if self._idle_timer is not threading.current_thread():
+                return
+            self._idle_timer = None
+            if self.state is not State.IDLE or self.transcriber is None:
+                return
+            self.transcriber.close()
+            self.transcriber = None
+        logger.info(f"Modelo {self.model_name} liberado por inactividad ({self.idle_timeout:g} s sin uso).")
 
 
 def parse_key(name: str) -> keyboard.Key | keyboard.KeyCode:
@@ -374,7 +411,7 @@ def main() -> None:
     logger.info(f"Cambio de entrada de audio: tecla {switch_key_name!r}.")
     logger.info(f"Listo. Mantén pulsada la tecla {key_name!r} para dictar. Ctrl+C para salir.")
 
-    push_to_talk = PushToTalk(key, switch_key, device, transcriber, model, config.min_seconds, config.max_seconds)
+    push_to_talk = PushToTalk(key, switch_key, device, transcriber, model, language, config.min_seconds, config.max_seconds, config.idle_timeout)
     push_to_talk.start_watcher(config.watch_interval)
     try:
         with keyboard.Listener(on_press=push_to_talk.on_press, on_release=push_to_talk.on_release) as listener:
