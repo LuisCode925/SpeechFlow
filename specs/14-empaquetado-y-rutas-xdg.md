@@ -7,7 +7,7 @@
 
 ## Por qué existe esta spec
 
-Tras la SPEC 13 la lógica vive en `src/speechflow/app.py`, pero sigue sin poder arrancarse sin `scripts/push_to_talk.py` y su `sys.path.insert`. Además, `config.py` calcula `REPO_ROOT` desde `__file__` (`parents[2]`): un paquete instalado (`site-packages`) escribiría el estado y la plantilla de emergencia en un sitio incorrecto. Es el segundo paso de la Fase 2 (SPEC 13–16): los tests (15) y el cierre limpio (16) necesitan un paquete instalable y rutas que no dependan del repo. Sustituye las rutas de la SPEC 10 (`speechflow.toml`, `speechflow.emergency.toml` y `.speechflow-state.toml` en la raíz del repo).
+Tras la SPEC 13 la lógica vive en `src/speechflow/app.py`, pero sigue sin poder arrancarse sin `scripts/push_to_talk.py` y su `sys.path.insert`. Además, `config.py` calcula `REPO_ROOT` desde `__file__` (`parents[2]`): un paquete instalado (`site-packages`) escribiría el estado y la plantilla de emergencia en un sitio incorrecto. Es el segundo paso de la Fase 2 (SPEC 13–16): el cierre limpio (15) y los tests (16) necesitan un paquete instalable y rutas que no dependan del repo. Sustituye las rutas de la SPEC 10 (`speechflow.toml`, `speechflow.emergency.toml` y `.speechflow-state.toml` en la raíz del repo).
 
 ## Alcance
 
@@ -36,7 +36,7 @@ Tras la SPEC 13 la lógica vive en `src/speechflow/app.py`, pero sigue sin poder
 - Rutas distintas de Linux/XDG (macOS, Windows).
 - Cambiar el formato, las claves o la precedencia de la configuración (SPEC 10).
 - Cambiar `benchmark_stt.py`, `audio.py`, `inserter.py`, `log.py`, `notifier.py` y `transcriber.py`.
-- Tests (SPEC 15) y cierre ante `SIGTERM`/`SIGHUP` (SPEC 16).
+- Cierre ante `SIGTERM`/`SIGHUP` (SPEC 15) y tests (SPEC 16).
 - Servicio `systemd`, archivo de log y bandeja (Fase 3).
 
 ## Modelo de datos

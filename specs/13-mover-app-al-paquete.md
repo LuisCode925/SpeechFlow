@@ -7,7 +7,7 @@
 
 ## Por qué existe esta spec
 
-Toda la lógica de la aplicación (`State`, `PushToTalk`, `parse_key`, `describe_device`, `load_transcriber`, `resolve_config` y `main()`) vive en `scripts/push_to_talk.py` (480 líneas) y depende de un `sys.path.insert` para encontrar el paquete. No se puede importar desde tests ni desde un punto de entrada instalable. Es el primer paso de la Fase 2 (SPEC 13–16): empaquetado (14), tests (15) y cierre limpio (16) dependen de esto.
+Toda la lógica de la aplicación (`State`, `PushToTalk`, `parse_key`, `describe_device`, `load_transcriber`, `resolve_config` y `main()`) vive en `scripts/push_to_talk.py` (480 líneas) y depende de un `sys.path.insert` para encontrar el paquete. No se puede importar desde tests ni desde un punto de entrada instalable. Es el primer paso de la Fase 2 (SPEC 13–16): empaquetado (14), cierre limpio (15) y tests (16) dependen de esto.
 
 ## Alcance
 
@@ -23,8 +23,8 @@ Toda la lógica de la aplicación (`State`, `PushToTalk`, `parse_key`, `describe
 
 - `pyproject.toml`, `python -m speechflow` y el comando `speechflow` (SPEC 14).
 - Cambiar las rutas de configuración, estado y plantilla de emergencia (`REPO_ROOT`) (SPEC 14).
-- Tests (SPEC 15).
-- Manejo de `SIGTERM`/`SIGHUP` y espera a la transcripción en curso (SPEC 16).
+- Tests (SPEC 16).
+- Manejo de `SIGTERM`/`SIGHUP` y espera a la transcripción en curso (SPEC 15).
 - Refactorizar `PushToTalk` o dividir `app.py` en más módulos.
 - Cambios en `audio.py`, `config.py`, `inserter.py`, `log.py`, `notifier.py`, `transcriber.py`, `capture_mic.py` y `benchmark_stt.py`.
 
@@ -85,7 +85,7 @@ Convenciones:
 - **Sí:** `scripts/push_to_talk.py` se conserva como envoltorio. Los comandos documentados en el README siguen funcionando hasta la SPEC 14.
 - **No:** crear ya `__main__.py` ni `pyproject.toml`. Es el alcance de la SPEC 14.
 - **No:** tocar `REPO_ROOT` ni las rutas de configuración. Cambiarlas aquí mezclaría movimiento de código con cambios de comportamiento.
-- **No:** dividir `PushToTalk` en varios módulos. Se puede valorar tras los tests de la SPEC 15.
+- **No:** dividir `PushToTalk` en varios módulos. Se puede valorar tras los tests de la SPEC 16.
 - **Sí:** el nombre `app.py` en vez de `push_to_talk.py` dentro del paquete, para evitar dos módulos con el mismo nombre y dejar espacio a otros modos de ejecución (daemon, bandeja) en la Fase 3.
 
 ## Riesgos
@@ -94,7 +94,7 @@ Convenciones:
 | --- | --- |
 | Un efecto secundario a nivel de módulo (`logger`, imports pesados) cambia al importar desde el paquete | Paso 1 comprueba que importar `speechflow.app` no tiene efectos; el `logger` solo se obtiene, no se configura. |
 | `--help` cambia porque el docstring se mueve | Guardar la salida previa y compararla en el paso 2. |
-| Importar `pynput` sin sesión gráfica falla al importar `app.py` | Ya ocurría con el script; la SPEC 15 lo resolverá con dobles. Se anota, no se corrige aquí. |
+| Importar `pynput` sin sesión gráfica falla al importar `app.py` | Ya ocurría con el script; la SPEC 16 lo resolverá con dobles. Se anota, no se corrige aquí. |
 | Rutas relativas a `__file__` en el código movido apuntan a otro sitio | Revisar los usos de `Path(__file__)` en el código movido; las rutas del repo ya salen de `config.REPO_ROOT`. |
 
 ## Lo que **no** está en esta spec
