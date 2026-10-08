@@ -93,15 +93,17 @@ print(f"{seconds:.2f} s: {text}")
 
 ## Módulos de captura, inserción, notificación y log
 
-- `src/speechflow/audio.py`: dispositivos de entrada, remuestreo, medición, guardado de WAV y `Recorder` (`start()` / `stop()`), que graba a la tasa nativa del dispositivo y devuelve `int16` mono a 16 kHz. Para el cambio de entrada en caliente expone `input_devices()` (índices con entrada), `refresh_devices()` (reinicializa PortAudio para ver micrófonos conectados o desconectados; solo sin streams abiertos), `device_index()` (índice real de un dispositivo, o `None`) y `next_input_device()` (el siguiente, con vuelta al principio). Para vigilar el micrófono seleccionado expone `device_name()` (nombre de un dispositivo, o `None`), `input_device_by_name()` (índice del primer dispositivo de entrada con ese nombre exacto, o `None`) y `Recorder.active` (hay un stream abierto y activo); `Recorder.stop()` tolera un stream caído. Lo usan `capture_mic.py` y `push_to_talk.py`.
+- `src/speechflow/audio.py`: dispositivos de entrada, remuestreo, medición, guardado de WAV y `Recorder` (`start()` / `stop()`), que graba a la tasa nativa del dispositivo y devuelve `int16` mono a 16 kHz. Para el cambio de entrada en caliente expone `input_devices()` (índices con entrada), `refresh_devices()` (reinicializa PortAudio para ver micrófonos conectados o desconectados; solo sin streams abiertos), `device_index()` (índice real de un dispositivo, o `None`) y `next_input_device()` (el siguiente, con vuelta al principio). Para vigilar el micrófono seleccionado expone `device_name()` (nombre de un dispositivo, o `None`), `input_device_by_name()` (índice del primer dispositivo de entrada con ese nombre exacto, o `None`) y `Recorder.active` (hay un stream abierto y activo); `Recorder.stop()` tolera un stream caído. Lo usan `capture_mic.py` y `app.py`.
 - `src/speechflow/inserter.py`: `insert_text(text)` escribe el texto en la ventana con foco con `xdotool type --clearmodifiers`.
 - `src/speechflow/notifier.py`: `notify(title, body)` envía una notificación de escritorio con `notify-send`; si no está instalado o están desactivadas con `set_enabled(False)`, no hace nada.
-- `src/speechflow/config.py`: configuración de usuario de `push_to_talk.py` (`Config`, `find_config()`, `load_config()`, `write_emergency()` y el estado del micrófono con `load_state_device()` / `save_state_device()`). Ver [Configuración](#configuración).
-- `src/speechflow/log.py`: `setup_logging()` configura el logger `speechflow` con el formato `AAAA-MM-DD HH:MM:SS.mmm NIVEL mensaje` (hora local). Las líneas `INFO` salen por stdout y las `WARNING` y `ERROR` por stderr. Es idempotente. `log_banner()` imprime por stdout, sin prefijo, el arte ASCII de SpeechFlow con su versión y la de `faster-whisper`; `push_to_talk.py` lo muestra justo antes de `Cargando ...`, una vez superadas las validaciones de arranque. Por ahora solo lo usa `push_to_talk.py`.
+- `src/speechflow/config.py`: configuración de usuario de la app de push-to-talk (`Config`, `find_config()`, `load_config()`, `write_emergency()` y el estado del micrófono con `load_state_device()` / `save_state_device()`). Ver [Configuración](#configuración).
+- `src/speechflow/log.py`: `setup_logging()` configura el logger `speechflow` con el formato `AAAA-MM-DD HH:MM:SS.mmm NIVEL mensaje` (hora local). Las líneas `INFO` salen por stdout y las `WARNING` y `ERROR` por stderr. Es idempotente. `log_banner()` imprime por stdout, sin prefijo, el arte ASCII de SpeechFlow con su versión y la de `faster-whisper`; `app.py` lo muestra justo antes de `Cargando ...`, una vez superadas las validaciones de arranque. Por ahora solo lo usa `app.py`.
 
 ## Push-to-talk
 
 `scripts/push_to_talk.py` permite dictar en cualquier aplicación de X11: mantén pulsada una tecla global (`Right Ctrl` por defecto), habla, y al soltarla el texto se escribe en la ventana con foco. Se ejecuta en primer plano y termina con `Ctrl+C`.
+
+La lógica vive en `src/speechflow/app.py` (`State`, `PushToTalk`, `parse_key`, `describe_device`, `load_transcriber`, `resolve_config` y `main()`), importable desde otros módulos; `scripts/push_to_talk.py` es solo el punto de entrada que la invoca.
 
 ```bash
 python scripts/push_to_talk.py --list-devices   # lista los dispositivos de entrada
@@ -183,7 +185,7 @@ Un argumento escrito en la línea de comandos gana sobre el archivo de configura
 
 ## Configuración
 
-`push_to_talk.py` lee un archivo TOML opcional (solo él; `capture_mic.py`, `benchmark_stt.py` y `--list-devices` no lo usan). Se usa el primero que exista, sin fusionar:
+La app de push-to-talk lee un archivo TOML opcional (solo ella; `capture_mic.py`, `benchmark_stt.py` y `--list-devices` no lo usan). Se usa el primero que exista, sin fusionar:
 
 1. `--config RUTA` (si no existe, el script sale con `ERROR` y código 1).
 2. `speechflow.toml` en la raíz del repo (la carpeta que contiene `scripts/` y `src/`), sea cual sea el directorio de trabajo.
