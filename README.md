@@ -33,7 +33,7 @@ conda env create -f environment.yml
 conda activate speechflow
 ```
 
-El entorno incluye Python 3.12, `faster-whisper`, `sounddevice` (con `portaudio`), `scipy`, `pynput`, y cuBLAS y cuDNN (CUDA 12) desde conda-forge.
+El entorno incluye Python 3.12, `sounddevice` (con `portaudio`), `scipy`, y cuBLAS y cuDNN (CUDA 12) desde conda-forge; el resto de dependencias (`faster-whisper`, `av<17`, `pynput`) y el propio paquete se instalan con `pip install -e .` (declarado en `environment.yml` y `pyproject.toml`). Eso deja el comando `speechflow` en el `PATH` del entorno, que debe estar activado. En un entorno existente: `pip install -e .`.
 
 Para comprobar que la GPU es visible:
 
@@ -68,12 +68,10 @@ La primera ejecución descarga los modelos desde Hugging Face (`medium` pesa ~1.
 `src/speechflow/transcriber.py` define `Transcriber`, que carga `faster-whisper` una sola vez (GPU, `int8`), hace un calentamiento y transcribe cuantas veces se quiera sin recargar el modelo.
 
 ```python
-import sys
 import wave
 
 import numpy as np
 
-sys.path.insert(0, "src")
 from speechflow.transcriber import Transcriber
 
 transcriber = Transcriber("medium", "es")  # carga y calienta el modelo una vez
@@ -101,23 +99,24 @@ print(f"{seconds:.2f} s: {text}")
 
 ## Push-to-talk
 
-`scripts/push_to_talk.py` permite dictar en cualquier aplicación de X11: mantén pulsada una tecla global (`Right Ctrl` por defecto), habla, y al soltarla el texto se escribe en la ventana con foco. Se ejecuta en primer plano y termina con `Ctrl+C`.
+El comando `speechflow` permite dictar en cualquier aplicación de X11: mantén pulsada una tecla global (`Right Ctrl` por defecto), habla, y al soltarla el texto se escribe en la ventana con foco. Se ejecuta en primer plano y termina con `Ctrl+C`. `python -m speechflow` es equivalente.
 
-La lógica vive en `src/speechflow/app.py` (`State`, `PushToTalk`, `parse_key`, `describe_device`, `load_transcriber`, `resolve_config` y `main()`), importable desde otros módulos; `scripts/push_to_talk.py` es solo el punto de entrada que la invoca.
+La lógica vive en `src/speechflow/app.py` (`State`, `PushToTalk`, `parse_key`, `describe_device`, `load_transcriber`, `resolve_config` y `main()`), importable desde otros módulos; `speechflow.app:main` es el punto de entrada del comando y `src/speechflow/__main__.py` el de `python -m speechflow`.
 
 ```bash
-python scripts/push_to_talk.py --list-devices   # lista los dispositivos de entrada
-python scripts/push_to_talk.py                  # Right Ctrl, modelo medium, español
-python scripts/push_to_talk.py --key f9         # otra tecla de disparo
-python scripts/push_to_talk.py --switch-key f7  # otra tecla de cambio de entrada
-python scripts/push_to_talk.py --device 6 --model small --language en
-python scripts/push_to_talk.py --config mi-config.toml
+speechflow --list-devices   # lista los dispositivos de entrada
+speechflow                  # Right Ctrl, modelo medium, español
+speechflow --key f9         # otra tecla de disparo
+speechflow --switch-key f7  # otra tecla de cambio de entrada
+speechflow --device 6 --model small --language en
+speechflow --config mi-config.toml
+python -m speechflow        # equivalente a `speechflow`
 ```
 
 Salida de ejemplo:
 
 ```
-2026-10-05 14:32:02.580 INFO    Configuración: /home/usuario/speech-flow/speechflow.toml
+2026-10-05 14:32:02.580 INFO    Configuración: /home/usuario/.config/speechflow/config.toml
 ________                       ______ _______________
 __  ___/__________________________  /____  ____/__  /________      __
 _____ \___  __ \  _ \  _ \  ___/_  __ \_  /_   __  /_  __ \_ | /| / /
@@ -165,7 +164,7 @@ Opciones:
 | `--language` | Idioma de la transcripción. | `es` |
 | `--key` | Tecla de disparo: nombre de `pynput.keyboard.Key` (`ctrl_r`, `f9`, ...) o un carácter suelto. Falla con un mensaje claro si no existe. | `ctrl_r` |
 | `--switch-key` | Tecla de cambio de entrada de audio, mismo formato que `--key`. Debe ser distinta de `--key`; si no, el script sale con código 1. | `f8` |
-| `--config` | Archivo de configuración TOML. Si no existe, el script sale con código 1. | `speechflow.toml` en la raíz del repo; si no, `~/.config/speechflow/config.toml` |
+| `--config` | Archivo de configuración TOML. Si no existe, el script sale con código 1. | `$XDG_CONFIG_HOME/speechflow/config.toml` (`~/.config/speechflow/config.toml`) |
 
 Un argumento escrito en la línea de comandos gana sobre el archivo de configuración (ver [Configuración](#configuración)).
 
@@ -176,7 +175,7 @@ Un argumento escrito en la línea de comandos gana sobre el archivo de configura
 - **Límite:** a los 60 s (`[recording] max_seconds`) la grabación se corta sola, se transcribe lo grabado y se avisa. No empieza otra hasta soltar la tecla y volver a pulsarla.
 - **Durante la transcripción:** pulsar la tecla no inicia otra grabación.
 - **Avisos:** todo se muestra por consola con prefijo de fecha, hora y nivel. Como notificación de escritorio solo salen el ciclo de vida del modelo en el arranque y la salida (`Cargando {modelo}...`, `Modelo {modelo} cargado`, `Modelo liberado`), los errores (micrófono, transcripción, inserción o recarga del modelo) el cambio de entrada de audio (`Entrada de audio: {nombre}`) y las alertas del micrófono (`Micrófono desconectado: {nombre}`, `Micrófono reconectado: {nombre}` y, al arrancar, `Micrófono guardado no disponible: {nombre}`). Dictar no genera notificaciones. Si falta `notify-send`, se avisa una vez y sigue funcionando solo con consola. Con `[notifications] enabled = false` no sale ninguna notificación y ese aviso tampoco.
-- **Cambio de entrada en caliente:** pulsar `--switch-key` (`f8`) pasa al siguiente dispositivo de entrada, en orden de índice y con vuelta al principio, sin recargar el modelo. Cada pulsación relee la lista de dispositivos, así que un micrófono conectado o desconectado con el script en marcha se tiene en cuenta. La rotación incluye todo lo que muestra `--list-devices` (también los `Loopback`; si el elegido no abre, el error sale al dictar y basta pulsar la tecla otra vez). Solo cambia en reposo: durante la grabación o la transcripción se registra un `WARNING` y no pasa nada. Con un único dispositivo se registra `Solo hay un dispositivo de entrada: ...` sin notificación. Un cambio efectivo guarda el nombre del dispositivo en `.speechflow-state.toml`, y al reiniciar se usa ese micrófono (ver [Configuración](#configuración)).
+- **Cambio de entrada en caliente:** pulsar `--switch-key` (`f8`) pasa al siguiente dispositivo de entrada, en orden de índice y con vuelta al principio, sin recargar el modelo. Cada pulsación relee la lista de dispositivos, así que un micrófono conectado o desconectado con el script en marcha se tiene en cuenta. La rotación incluye todo lo que muestra `--list-devices` (también los `Loopback`; si el elegido no abre, el error sale al dictar y basta pulsar la tecla otra vez). Solo cambia en reposo: durante la grabación o la transcripción se registra un `WARNING` y no pasa nada. Con un único dispositivo se registra `Solo hay un dispositivo de entrada: ...` sin notificación. Un cambio efectivo guarda el nombre del dispositivo en `state.toml` (ver [Configuración](#configuración)), y al reiniciar se usa ese micrófono.
 - **Vigilancia del micrófono:** un hilo comprueba cada `[audio] watch_interval` segundos (defecto 3, mínimo 1) que el micrófono seleccionado sigue conectado; lo identifica por nombre, porque los índices cambian al releer los dispositivos. En reposo relee los dispositivos (`refresh_devices()`) bajo el mismo bloqueo que las teclas, así que una pulsación puede esperar unos instantes. Al desconectarse registra un `WARNING` (`El micrófono seleccionado se desconectó: ...`) y envía una notificación, una sola vez. Mientras está desconectado, la tecla de grabar solo muestra un `WARNING` y no graba; reconectarlo o pulsar `--switch-key` lo resuelve. Al reconectarse registra `Micrófono reconectado: ...`, notifica y vuelve a usarlo sin pulsar nada. Si cae durante una grabación (no relee dispositivos en ese caso, solo comprueba que el stream siga activo), registra `...se desconectó durante la grabación: ...`, detiene la grabación y transcribe lo capturado si dura al menos `min_seconds`. PortAudio puede imprimir por stderr líneas `Expression 'alsa_snd_pcm_...' failed` en ese momento; no pasan por el log. No cambia solo de micrófono.
 - **Salida:** `Ctrl+C` espera a una recarga en curso, libera el modelo con `Transcriber.close()` (suelta la GPU antes de terminar el proceso) y notifica `Modelo liberado`; la consola muestra `Saliendo.` y `Modelo {modelo} liberado.`. Si el modelo ya estaba descargado por inactividad, solo muestra `Saliendo.`.
 - **Requisitos:** sesión X11 y `xdotool` instalado; si falta, el script sale al arrancar con código 1 y una línea `ERROR` indicando `sudo apt install xdotool`. Los errores de arranque (`--key`, `--switch-key` o `--device` inválidos, o `--switch-key` igual a `--key`) también terminan con código 1.
@@ -188,10 +187,19 @@ Un argumento escrito en la línea de comandos gana sobre el archivo de configura
 La app de push-to-talk lee un archivo TOML opcional (solo ella; `capture_mic.py`, `benchmark_stt.py` y `--list-devices` no lo usan). Se usa el primero que exista, sin fusionar:
 
 1. `--config RUTA` (si no existe, el script sale con `ERROR` y código 1).
-2. `speechflow.toml` en la raíz del repo (la carpeta que contiene `scripts/` y `src/`), sea cual sea el directorio de trabajo.
-3. `~/.config/speechflow/config.toml`.
+2. `$XDG_CONFIG_HOME/speechflow/config.toml` (defecto `~/.config/speechflow/config.toml`), sea cual sea el directorio de trabajo.
 
-`speechflow.example.toml` es un ejemplo con todas las claves comentadas; cópialo a `speechflow.toml`. Todas las claves son opcionales:
+Rutas de usuario (estándar XDG; una variable `XDG_*` vacía o con ruta relativa se ignora):
+
+| Archivo | Ruta | Defecto |
+| ------- | ---- | ------- |
+| Configuración (la editas tú) | `$XDG_CONFIG_HOME/speechflow/config.toml` | `~/.config/speechflow/config.toml` |
+| Plantilla de emergencia | `$XDG_CONFIG_HOME/speechflow/config.emergency.toml` | `~/.config/speechflow/config.emergency.toml` |
+| Estado (lo escribe el script) | `$XDG_STATE_HOME/speechflow/state.toml` | `~/.local/state/speechflow/state.toml` |
+
+Las carpetas se crean al escribir la plantilla o el estado. Un `speechflow.toml`, `speechflow.emergency.toml` o `.speechflow-state.toml` en la raíz del repo (rutas anteriores) se ignora y **no se migra** ni se avisa de ello: muévelos a mano a las rutas nuevas (`speechflow.toml` → `config.toml`, `.speechflow-state.toml` → `state.toml`).
+
+`speechflow.example.toml` es un ejemplo con todas las claves comentadas; cópialo a `~/.config/speechflow/config.toml`. Todas las claves son opcionales:
 
 ```toml
 [model]
@@ -215,20 +223,20 @@ max_seconds = 60.0
 enabled = true
 ```
 
-**Precedencia por valor:** argumento de CLI (solo si se escribió) > micrófono guardado (solo el dispositivo) > archivo > defectos. En concreto, el dispositivo es `--device` > `.speechflow-state.toml` > `[audio] device` > el que contenga "Realtek", si no el del sistema.
+**Precedencia por valor:** argumento de CLI (solo si se escribió) > micrófono guardado (solo el dispositivo) > archivo > defectos. En concreto, el dispositivo es `--device` > `state.toml` > `[audio] device` > el que contenga "Realtek", si no el del sistema.
 
 **Validación:** una clave o sección desconocida, un tipo incorrecto, `min_seconds <= 0` o `max_seconds <= min_seconds` o `watch_interval < 1.0`, o un `idle_timeout` distinto de 0 y menor que 30.0 hacen inválido el archivo. Las teclas se siguen validando al arrancar con los mismos mensajes `ERROR` de `--key` y `--switch-key`.
 
-**Archivo de emergencia:** si no se encuentra ningún archivo, o el encontrado no se puede leer o no es válido, el script registra un `WARNING` con la causa, crea `speechflow.emergency.toml` en la raíz del repo con todos los valores por defecto (sin sobrescribirlo si ya existe) y sigue con los defectos. El archivo inválido del usuario no se toca. La plantilla de emergencia no se lee nunca: cópiala o renómbrala a `speechflow.toml` para usarla.
+**Archivo de emergencia:** si no se encuentra ningún archivo, o el encontrado no se puede leer o no es válido, el script registra un `WARNING` con la causa, crea `config.emergency.toml` junto al archivo de configuración con todos los valores por defecto (sin sobrescribirlo si ya existe) y sigue con los defectos. El archivo inválido del usuario no se toca. La plantilla de emergencia no se lee nunca: cópiala o renómbrala a `config.toml` para usarla.
 
 ```
-2026-10-05 14:32:02.580 WARNING Configuración inválida en /home/usuario/speech-flow/speechflow.toml: clave desconocida model.modle. Se usan los valores por defecto; plantilla en /home/usuario/speech-flow/speechflow.emergency.toml.
+2026-10-05 14:32:02.580 WARNING Configuración inválida en /home/usuario/.config/speechflow/config.toml: clave desconocida model.modle. Se usan los valores por defecto; plantilla en /home/usuario/.config/speechflow/config.emergency.toml.
 2026-10-05 14:32:02.580 INFO    Configuración: valores por defecto
 ```
 
-**Micrófono guardado:** cada cambio efectivo con `--switch-key` escribe el **nombre** del dispositivo en `.speechflow-state.toml` (raíz del repo; lo escribe el script, no se edita a mano). Al arrancar se usa ese micrófono salvo que se pase `--device`. Si ya no está disponible (por ejemplo, un USB desenchufado), se registra un `WARNING`, se envía la notificación `Micrófono guardado no disponible: {nombre}` y se usa el siguiente nivel de la precedencia. Ese micrófono no se vigila: el hilo vigila el que se haya elegido al arrancar.
+**Micrófono guardado:** cada cambio efectivo con `--switch-key` escribe el **nombre** del dispositivo en `state.toml` (en `$XDG_STATE_HOME/speechflow/`; lo escribe el script, no se edita a mano). Al arrancar se usa ese micrófono salvo que se pase `--device`. Si ya no está disponible (por ejemplo, un USB desenchufado), se registra un `WARNING`, se envía la notificación `Micrófono guardado no disponible: {nombre}` y se usa el siguiente nivel de la precedencia. Ese micrófono no se vigila: el hilo vigila el que se haya elegido al arrancar.
 
-`speechflow.toml`, `speechflow.emergency.toml` y `.speechflow-state.toml` están en `.gitignore`; solo `speechflow.example.toml` se versiona.
+Estos archivos viven fuera del repo; en el repo solo se versiona `speechflow.example.toml`.
 
 ## Captura del micrófono
 

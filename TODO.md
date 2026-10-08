@@ -7,7 +7,7 @@ Ideas recogidas de la sección "Lo que **no** está en esta spec" de las SPEC 01
 Orden y dependencias: 13 → 14 → 15 → 16.
 
 - [x] ~~SPEC 13: mover la app de `scripts/push_to_talk.py` a `src/speechflow/app.py`, sin cambios de comportamiento.~~
-- [ ] SPEC 14: `pyproject.toml`, comando `speechflow`, `python -m speechflow` y rutas de configuración/estado independientes del repo.
+- [x] ~~SPEC 14: `pyproject.toml`, comando `speechflow`, `python -m speechflow` y rutas de configuración/estado independientes del repo.~~
 - [ ] SPEC 15: cierre limpio ante `SIGTERM`/`SIGHUP` y espera a la transcripción en curso.
 - [ ] SPEC 16: tests con `pytest` (config, audio, `PushToTalk` con dobles; los que usen GPU, marcados y excluidos por defecto).
 
@@ -62,5 +62,5 @@ Fase 3 (después): servicio `systemd` de usuario, archivo de log con rotación y
 
 ## Calidad y empaquetado
 
-- [ ] Empaquetado (`pyproject.toml`) y `python -m speechflow` (SPEC 04, 05).
+- [x] ~~Empaquetado (`pyproject.toml`) y `python -m speechflow` (SPEC 04, 05).~~ (SPEC 14)
 - [ ] Tests con `pytest` (SPEC 04, 05).

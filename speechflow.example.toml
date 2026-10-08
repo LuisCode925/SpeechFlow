@@ -1,5 +1,5 @@
-# speechflow.example.toml — ejemplo de configuración de push_to_talk.py.
-# Cópialo a speechflow.toml (raíz del repo) o a ~/.config/speechflow/config.toml y descomenta lo que quieras cambiar.
+# speechflow.example.toml — ejemplo de configuración de speechflow.
+# Cópialo a ~/.config/speechflow/config.toml ($XDG_CONFIG_HOME/speechflow/config.toml) y descomenta lo que quieras cambiar.
 # Todas las claves son opcionales; los valores mostrados son los defectos. Un argumento de CLI gana sobre este archivo.
 
 [model]
