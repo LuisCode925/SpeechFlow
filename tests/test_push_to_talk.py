@@ -1,11 +1,16 @@
 """Tests de PushToTalk con dobles de Recorder, Transcriber, notify e insert_text."""
+import threading
+import time
+from types import SimpleNamespace
+
 import pytest
 import sounddevice as sd
 from pynput import keyboard
 
+from speechflow import app, config
 from speechflow.app import State
 
-from conftest import TranscriberFalso, esperar
+from conftest import TranscriberFalso, dispositivo, esperar
 
 R = keyboard.KeyCode.from_char("r")  # tecla de dictado
 F = keyboard.KeyCode.from_char("f")  # tecla de cambio de entrada
@@ -143,3 +148,292 @@ class TestDictation:
         assert ptt.state is State.TRANSCRIBING and ptt.recorder.inicios == 1
         transcriber.liberar.set()
         esperar_idle(ptt)
+
+
+DESCRIPCION_REALTEK = "[1] Realtek ALC | 48000 Hz nativos a 16000 Hz mono"
+DESCRIPCION_USB = "[2] USB Mic | 48000 Hz nativos a 16000 Hz mono"
+
+
+class TestSwitchAndWatch:
+    def test_cambia_al_siguiente_dispositivo(self, crear_ptt, dobles, caplog):
+        """En IDLE la tecla de cambio pasa al siguiente micrófono, lo notifica y lo guarda en state.toml."""
+        ptt = crear_ptt(device=1)
+        ptt.on_press(F)
+        assert ptt.recorder.device == 2
+        assert f"Entrada de audio cambiada: {DESCRIPCION_USB}" in mensajes(caplog)
+        assert ("SpeechFlow", "Entrada de audio: USB Mic") in dobles.notificaciones
+        assert ptt._watched_name == "USB Mic"
+        assert config.load_state_device() == "USB Mic"
+
+    def test_da_la_vuelta_al_principio(self, crear_ptt):
+        ptt = crear_ptt(device=2)
+        ptt.on_press(F)
+        assert ptt.recorder.device == 1
+
+    def test_repeticion_de_la_tecla_de_cambio(self, crear_ptt):
+        """Mantener la tecla no encadena cambios; soltar y pulsar otra vez sí."""
+        ptt = crear_ptt(device=1)
+        ptt.on_press(F)
+        ptt.on_press(F)
+        assert ptt.recorder.device == 2
+        ptt.on_release(F)
+        ptt.on_press(F)
+        assert ptt.recorder.device == 1
+
+    @pytest.mark.parametrize("estado", [State.RECORDING, State.TRANSCRIBING])
+    def test_solo_cambia_en_idle(self, crear_ptt, caplog, estado):
+        ptt = crear_ptt(device=1)
+        ptt.state = estado
+        ptt.switch_device()
+        assert ptt.recorder.device == 1
+        assert "No se cambia la entrada de audio mientras se graba o se transcribe." in mensajes(caplog, "WARNING")
+
+    def test_un_unico_dispositivo(self, crear_ptt, sounddevice_falso, caplog):
+        del sounddevice_falso.dispositivos[2]
+        ptt = crear_ptt(device=1)
+        ptt.switch_device()
+        assert ptt.recorder.device == 1
+        assert f"Solo hay un dispositivo de entrada: {DESCRIPCION_REALTEK}" in mensajes(caplog)
+        assert config.load_state_device() is None
+
+    def test_un_unico_dispositivo_ausente_lo_recupera(self, crear_ptt, sounddevice_falso):
+        """Si el único micrófono estaba marcado como ausente, el cambio lo vuelve a seleccionar."""
+        del sounddevice_falso.dispositivos[2]
+        ptt = crear_ptt(device=1)
+        ptt._device_missing = True
+        ptt.switch_device()
+        assert ptt._device_missing is False
+
+    def test_sin_dispositivos_de_entrada(self, crear_ptt, sounddevice_falso, caplog):
+        sounddevice_falso.dispositivos.clear()
+        ptt = crear_ptt(device=1)
+        ptt.switch_device()
+        assert "No hay dispositivos de entrada disponibles; se mantiene 1." in mensajes(caplog, "ERROR")
+        assert ptt.recorder.device == 1
+
+    def test_error_al_releer_los_dispositivos(self, crear_ptt, monkeypatch, caplog):
+        def falla():
+            raise RuntimeError("PortAudio roto")
+
+        monkeypatch.setattr(app, "refresh_devices", falla)
+        ptt = crear_ptt(device=1)
+        ptt.switch_device()
+        assert (
+            f"Error al releer los dispositivos de audio: PortAudio roto; se mantiene {DESCRIPCION_REALTEK}."
+            in mensajes(caplog, "ERROR")
+        )
+        assert ptt.recorder.device == 1
+
+    def test_fallo_al_guardar_el_estado(self, crear_ptt, monkeypatch, caplog):
+        def falla(nombre):
+            raise OSError("disco lleno")
+
+        monkeypatch.setattr(app, "save_state_device", falla)
+        ptt = crear_ptt(device=1)
+        ptt.switch_device()
+        assert ptt.recorder.device == 2  # el cambio se mantiene
+        assert "No se pudo guardar la entrada de audio en state.toml: disco lleno" in mensajes(caplog, "WARNING")
+
+    def test_tras_begin_shutdown_no_cambia(self, crear_ptt):
+        ptt = crear_ptt(device=1)
+        ptt.begin_shutdown()
+        ptt.switch_device()
+        assert ptt.recorder.device == 1
+
+    # --- vigilante ---
+
+    def test_avisa_una_sola_vez_de_la_desconexion(self, crear_ptt, dobles, sounddevice_falso, caplog):
+        ptt = crear_ptt(device=2)
+        del sounddevice_falso.dispositivos[2]
+        ptt.start_watcher(0.01)
+        esperar(lambda: "El micrófono seleccionado se desconectó: USB Mic." in mensajes(caplog, "WARNING"))
+        time.sleep(0.1)  # varias vueltas más del vigilante
+        assert mensajes(caplog, "WARNING").count("El micrófono seleccionado se desconectó: USB Mic.") == 1
+        assert dobles.notificaciones == [("SpeechFlow", "Micrófono desconectado: USB Mic")]
+        assert ptt._device_missing is True
+
+    def test_avisa_de_la_reconexion_y_actualiza_el_indice(self, crear_ptt, dobles, sounddevice_falso, caplog):
+        """Al volver, el micrófono puede tener otro índice: el grabador lo adopta."""
+        ptt = crear_ptt(device=2)
+        usb = sounddevice_falso.dispositivos.pop(2)
+        ptt.start_watcher(0.01)
+        esperar(lambda: ptt._device_missing)
+        sounddevice_falso.dispositivos.extend([dispositivo("Otro"), usb])
+        esperar(lambda: not ptt._device_missing)
+        assert ptt.recorder.device == 3
+        assert "Micrófono reconectado: [3] USB Mic | 48000 Hz nativos a 16000 Hz mono" in mensajes(caplog, "INFO")
+        assert dobles.notificaciones[-1] == ("SpeechFlow", "Micrófono reconectado: USB Mic")
+
+    def test_no_avisa_si_sigue_conectado(self, crear_ptt, dobles, sounddevice_falso):
+        ptt = crear_ptt(device=2)
+        ptt.start_watcher(0.01)
+        esperar(lambda: sounddevice_falso.reinicios >= 3)
+        assert dobles.notificaciones == [] and ptt._device_missing is False
+
+    def test_perdida_durante_la_grabacion(self, crear_ptt, dobles, caplog):
+        """Si el stream cae grabando, se avisa y se transcribe lo capturado."""
+        ptt = crear_ptt(device=2)
+        ptt.on_press(R)
+        ptt.recorder.caer()
+        ptt.start_watcher(0.01)
+        assert dobles.insertado.wait(2)
+        assert "El micrófono seleccionado se desconectó durante la grabación: USB Mic." in mensajes(caplog, "WARNING")
+        assert ("SpeechFlow", "Micrófono desconectado: USB Mic") in dobles.notificaciones
+        assert ptt._device_missing is True and ptt.recorder.paradas == 1
+        assert dobles.textos == ["hola mundo"]
+
+    def test_no_refresca_portaudio_mientras_graba(self, crear_ptt, sounddevice_falso):
+        """Con un stream abierto y activo el vigilante no reinicia PortAudio."""
+        ptt = crear_ptt(device=2)
+        ptt.on_press(R)
+        ptt.start_watcher(0.01)
+        time.sleep(0.1)
+        assert sounddevice_falso.reinicios == 0 and ptt.state is State.RECORDING
+
+    def test_no_vigila_sin_nombre_de_dispositivo(self, crear_ptt, sounddevice_falso):
+        ptt = crear_ptt(device=99)  # no se resuelve: no hay nombre que vigilar
+        ptt.start_watcher(0.01)
+        time.sleep(0.1)
+        assert sounddevice_falso.reinicios == 0
+
+    def test_error_al_refrescar_se_registra_una_vez(self, crear_ptt, monkeypatch, caplog):
+        llamadas = []
+
+        def falla():
+            llamadas.append(1)
+            raise RuntimeError("PortAudio roto")
+
+        monkeypatch.setattr(app, "refresh_devices", falla)
+        ptt = crear_ptt(device=2)
+        ptt.start_watcher(0.01)
+        esperar(lambda: len(llamadas) >= 4)
+        assert mensajes(caplog, "ERROR").count("Error al comprobar el micrófono: PortAudio roto") == 1
+
+    def test_stop_watcher_detiene_las_comprobaciones(self, crear_ptt, sounddevice_falso):
+        ptt = crear_ptt(device=2)
+        ptt.start_watcher(0.01)
+        esperar(lambda: sounddevice_falso.reinicios >= 1)
+        ptt.stop_watcher()
+        time.sleep(0.05)  # deja terminar una vuelta en curso
+        antes = sounddevice_falso.reinicios
+        time.sleep(0.1)
+        assert sounddevice_falso.reinicios == antes
+
+
+@pytest.fixture
+def carga(monkeypatch):
+    """Sustituye load_transcriber: bloquea en `puerta` y devuelve un TranscriberFalso o lanza `error`."""
+    estado = SimpleNamespace(puerta=threading.Event(), llamadas=[], error=None, creados=[])
+
+    def cargar(model, language):
+        estado.llamadas.append((model, language))
+        estado.puerta.wait(2)
+        if estado.error is not None:
+            raise estado.error
+        transcriber = TranscriberFalso()
+        estado.creados.append(transcriber)
+        return transcriber
+
+    monkeypatch.setattr(app, "load_transcriber", cargar)
+    yield estado
+    estado.puerta.set()
+
+
+class TestIdleAndReload:
+    def test_idle_timeout_libera_el_modelo(self, crear_ptt, caplog):
+        transcriber = TranscriberFalso()
+        ptt = crear_ptt(transcriber=transcriber, idle_timeout=0.05)
+        esperar(lambda: ptt.transcriber is None)
+        assert transcriber.cierres == 1
+        assert "Modelo medium liberado por inactividad (0.05 s sin uso)." in mensajes(caplog, "INFO")
+
+    def test_idle_timeout_cero_no_libera(self, crear_ptt):
+        transcriber = TranscriberFalso()
+        ptt = crear_ptt(transcriber=transcriber, idle_timeout=0)
+        assert ptt._idle_timer is None
+        time.sleep(0.1)
+        assert ptt.transcriber is transcriber and transcriber.cierres == 0
+
+    def test_idle_timeout_cero_tras_dictar_no_libera(self, crear_ptt, dobles):
+        transcriber = TranscriberFalso()
+        ptt = crear_ptt(transcriber=transcriber, idle_timeout=0)
+        ptt.on_press(R)
+        ptt.on_release(R)
+        esperar_idle(ptt)
+        assert ptt._idle_timer is None and ptt.transcriber is transcriber
+
+    def test_grabando_no_se_libera_el_modelo(self, crear_ptt):
+        """Pulsar cancela la cuenta de inactividad."""
+        transcriber = TranscriberFalso()
+        ptt = crear_ptt(transcriber=transcriber, idle_timeout=0.05)
+        ptt.on_press(R)
+        time.sleep(0.15)  # tres veces el idle_timeout
+        assert ptt.transcriber is transcriber and transcriber.cierres == 0
+
+    def test_tras_dictar_se_rearma_la_cuenta(self, crear_ptt, dobles):
+        transcriber = TranscriberFalso()
+        ptt = crear_ptt(transcriber=transcriber, idle_timeout=0.05)
+        ptt.on_press(R)
+        ptt.on_release(R)
+        esperar(lambda: ptt.transcriber is None)
+        assert transcriber.cierres == 1 and dobles.textos == ["hola mundo"]
+
+    def test_grabacion_descartada_rearma_la_cuenta(self, crear_ptt):
+        transcriber = TranscriberFalso()
+        ptt = crear_ptt(transcriber=transcriber, idle_timeout=0.05)
+        ptt.recorder.segundos = 0.01
+        ptt.on_press(R)
+        ptt.on_release(R)
+        esperar(lambda: ptt.transcriber is None)
+        assert transcriber.cierres == 1
+
+    def test_pulsar_con_el_modelo_descargado_recarga_en_paralelo(self, crear_ptt, carga, dobles, caplog):
+        """Se graba al instante mientras el modelo se recarga; al soltar se espera a la carga."""
+        ptt = crear_ptt(transcriber=None)
+        ptt.on_press(R)
+        assert ptt.state is State.RECORDING and ptt.recorder.inicios == 1
+        assert ptt._loader.is_alive()
+        assert "Modelo descargado: se carga medium mientras grabas." in mensajes(caplog)
+        ptt.on_release(R)
+        assert dobles.textos == []  # la carga sigue bloqueada
+        carga.puerta.set()
+        assert dobles.insertado.wait(2)
+        assert dobles.textos == ["hola mundo"] and carga.llamadas == [("medium", "es")]
+        esperar_idle(ptt)
+        assert ptt.transcriber is carga.creados[0]
+
+    def test_fallo_de_recarga_descarta_el_audio(self, crear_ptt, carga, dobles, caplog):
+        carga.error = RuntimeError("sin VRAM")
+        carga.puerta.set()
+        ptt = crear_ptt(transcriber=None)
+        ptt.on_press(R)
+        ptt.on_release(R)
+        esperar_idle(ptt)
+        assert "Error al recargar el modelo: sin VRAM" in mensajes(caplog, "ERROR")
+        assert ("SpeechFlow", "Error al recargar el modelo: sin VRAM") in dobles.notificaciones
+        assert "Audio descartado: el modelo no se pudo recargar." in mensajes(caplog, "INFO")
+        assert dobles.textos == [] and ptt.transcriber is None
+
+    def test_tras_un_fallo_la_siguiente_pulsacion_reintenta(self, crear_ptt, carga, dobles):
+        carga.error = RuntimeError("sin VRAM")
+        carga.puerta.set()
+        ptt = crear_ptt(transcriber=None)
+        ptt.on_press(R)
+        ptt.on_release(R)
+        esperar_idle(ptt)
+        carga.error = None
+        ptt.on_press(R)
+        ptt.on_release(R)
+        assert dobles.insertado.wait(2)
+        assert len(carga.llamadas) == 2 and dobles.textos == ["hola mundo"]
+
+    def test_recarga_con_grabacion_descartada_rearma_la_cuenta(self, crear_ptt, carga):
+        """Si la grabación corta se descarta mientras carga, el modelo recién publicado se libera por inactividad."""
+        ptt = crear_ptt(transcriber=None, idle_timeout=0.05)
+        ptt.recorder.segundos = 0.01
+        ptt.on_press(R)
+        ptt.on_release(R)
+        assert ptt.state is State.IDLE
+        carga.puerta.set()
+        esperar(lambda: carga.creados and carga.creados[0].cierres == 1)
+        assert ptt.transcriber is None
