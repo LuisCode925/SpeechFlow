@@ -437,3 +437,140 @@ class TestIdleAndReload:
         carga.puerta.set()
         esperar(lambda: carga.creados and carga.creados[0].cierres == 1)
         assert ptt.transcriber is None
+
+
+def liberar_en(evento, segundos=0.05):
+    """Activa `evento` desde otro hilo tras `segundos`, para desbloquear un shutdown que espera."""
+    temporizador = threading.Timer(segundos, evento.set)
+    temporizador.daemon = True
+    temporizador.start()
+
+
+class TestShutdown:
+    def test_begin_shutdown_descarta_la_grabacion(self, crear_ptt, dobles, caplog):
+        """Una grabación en curso se detiene sin transcribir ni insertar nada."""
+        transcriber = TranscriberFalso()
+        ptt = crear_ptt(transcriber=transcriber)
+        ptt.on_press(R)
+        ptt.begin_shutdown()
+        assert ptt.state is State.IDLE and ptt.recorder.paradas == 1 and ptt._timer is None
+        assert "Grabación descartada por cierre." in mensajes(caplog)
+        assert transcriber.llamadas == 0 and dobles.textos == []
+
+    def test_begin_shutdown_en_reposo_no_descarta_nada(self, crear_ptt, caplog):
+        ptt = crear_ptt()
+        ptt.begin_shutdown()
+        assert ptt.recorder.paradas == 0
+        assert "Grabación descartada por cierre." not in mensajes(caplog)
+
+    def test_begin_shutdown_ignora_las_teclas(self, crear_ptt):
+        ptt = crear_ptt(device=1)
+        ptt.begin_shutdown()
+        ptt.on_press(R)
+        ptt.on_release(R)
+        ptt.on_press(F)
+        ptt.on_release(F)
+        assert ptt.recorder.inicios == 0 and ptt.state is State.IDLE
+        assert ptt.recorder.device == 1
+
+    def test_begin_shutdown_no_interrumpe_la_transcripcion(self, crear_ptt, dobles):
+        transcriber = TranscriberFalso(bloquear=True)
+        ptt = crear_ptt(transcriber=transcriber)
+        ptt.on_press(R)
+        ptt.on_release(R)
+        assert transcriber.entro.wait(2)
+        ptt.begin_shutdown()
+        assert ptt.state is State.TRANSCRIBING
+        transcriber.liberar.set()
+        assert dobles.insertado.wait(2)
+        esperar_idle(ptt)
+
+    def test_begin_shutdown_cancela_la_cuenta_de_inactividad(self, crear_ptt):
+        transcriber = TranscriberFalso()
+        ptt = crear_ptt(transcriber=transcriber, idle_timeout=0.05)
+        ptt.begin_shutdown()
+        time.sleep(0.15)
+        assert ptt.transcriber is transcriber and transcriber.cierres == 0 and ptt._idle_timer is None
+
+    def test_la_cuenta_no_se_rearma_tras_begin_shutdown(self, crear_ptt):
+        """Al terminar una transcripción en curso durante el cierre no se vuelve a armar el temporizador."""
+        transcriber = TranscriberFalso(bloquear=True)
+        ptt = crear_ptt(transcriber=transcriber, idle_timeout=0.05)
+        ptt.on_press(R)
+        ptt.on_release(R)
+        assert transcriber.entro.wait(2)
+        ptt.begin_shutdown()
+        transcriber.liberar.set()
+        esperar_idle(ptt)
+        assert ptt._idle_timer is None
+
+    def test_shutdown_libera_el_modelo(self, crear_ptt):
+        transcriber = TranscriberFalso()
+        ptt = crear_ptt(transcriber=transcriber)
+        assert ptt.shutdown(1) is True
+        assert transcriber.cierres == 1 and ptt.transcriber is None
+
+    def test_shutdown_repetido_no_cierra_dos_veces(self, crear_ptt):
+        transcriber = TranscriberFalso()
+        ptt = crear_ptt(transcriber=transcriber)
+        assert ptt.shutdown(1) is True
+        assert ptt.shutdown(1) is False
+        assert transcriber.cierres == 1
+
+    def test_shutdown_cancela_la_cuenta_de_inactividad(self, crear_ptt):
+        ptt = crear_ptt(idle_timeout=30.0)
+        assert ptt._idle_timer is not None
+        ptt.shutdown(1)
+        assert ptt._idle_timer is None
+
+    def test_shutdown_espera_a_la_transcripcion(self, crear_ptt, dobles, caplog):
+        """Con una transcripción en curso, espera a que termine y después libera el modelo."""
+        transcriber = TranscriberFalso(bloquear=True)
+        ptt = crear_ptt(transcriber=transcriber)
+        ptt.on_press(R)
+        ptt.on_release(R)
+        assert transcriber.entro.wait(2)
+        ptt.begin_shutdown()
+        liberar_en(transcriber.liberar)
+        assert ptt.shutdown(2) is True
+        assert dobles.textos == ["hola mundo"] and transcriber.cierres == 1
+        assert "Esperando a la transcripción en curso (máximo 2 s)..." in mensajes(caplog)
+
+    def test_shutdown_con_la_transcripcion_bloqueada_vence_el_tope(self, crear_ptt, dobles, caplog):
+        """Si la transcripción no termina en el plazo: False, WARNING y sin llamar a close()."""
+        transcriber = TranscriberFalso(bloquear=True)
+        ptt = crear_ptt(transcriber=transcriber)
+        ptt.on_press(R)
+        ptt.on_release(R)
+        assert transcriber.entro.wait(2)
+        ptt.begin_shutdown()
+        inicio = time.monotonic()
+        assert ptt.shutdown(0.05) is False
+        assert time.monotonic() - inicio < 1
+        assert "La transcripción no terminó en 0.05 s; se sale sin liberar el modelo." in mensajes(caplog, "WARNING")
+        assert transcriber.cierres == 0 and ptt.transcriber is transcriber
+        transcriber.liberar.set()
+
+    def test_shutdown_espera_a_la_recarga(self, crear_ptt, carga):
+        """Una recarga en curso se espera, y el modelo recién publicado se libera."""
+        ptt = crear_ptt(transcriber=None)
+        ptt.on_press(R)
+        ptt.begin_shutdown()
+        assert ptt._loader.is_alive()
+        liberar_en(carga.puerta)
+        assert ptt.shutdown(2) is True
+        assert len(carga.creados) == 1 and carga.creados[0].cierres == 1
+        assert ptt.transcriber is None
+
+    def test_shutdown_con_la_recarga_bloqueada_devuelve_false(self, crear_ptt, carga):
+        ptt = crear_ptt(transcriber=None)
+        ptt.on_press(R)
+        ptt.begin_shutdown()
+        assert ptt.shutdown(0.05) is False
+        assert carga.creados == []
+
+    def test_shutdown_con_el_modelo_ya_descargado(self, crear_ptt):
+        """Sin modelo cargado no hay nada que cerrar: devuelve False sin error."""
+        ptt = crear_ptt(transcriber=None)
+        assert ptt.shutdown(1) is False
+        assert ptt.transcriber is None
