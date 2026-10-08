@@ -7,8 +7,6 @@ import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-
 import sounddevice as sd
 
 from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, list_devices, measure, parse_device, save_wav
