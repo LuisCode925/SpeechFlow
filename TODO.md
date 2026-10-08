@@ -8,7 +8,7 @@ Orden y dependencias: 13 → 14 → 15 → 16.
 
 - [x] ~~SPEC 13: mover la app de `scripts/push_to_talk.py` a `src/speechflow/app.py`, sin cambios de comportamiento.~~
 - [x] ~~SPEC 14: `pyproject.toml`, comando `speechflow`, `python -m speechflow` y rutas de configuración/estado independientes del repo.~~
-- [ ] SPEC 15: cierre limpio ante `SIGTERM`/`SIGHUP` y espera a la transcripción en curso.
+- [x] ~~SPEC 15: cierre limpio ante `SIGTERM`/`SIGHUP` y espera a la transcripción en curso.~~
 - [ ] SPEC 16: tests con `pytest` (config, audio, `PushToTalk` con dobles; los que usen GPU, marcados y excluidos por defecto).
 
 Fase 3 (después): servicio `systemd` de usuario, archivo de log con rotación y bandeja del sistema.
@@ -43,8 +43,8 @@ Fase 3 (después): servicio `systemd` de usuario, archivo de log con rotación y
 - [ ] Bandeja del sistema (SPEC 01, 03, 04, 05).
 - [ ] Daemon, arranque automático y `systemd` (SPEC 03, 04, 05).
 - [x] ~~Descarga del modelo por inactividad y recarga bajo demanda (SPEC 06).~~ (SPEC 12)
-- [ ] Esperar a una transcripción en curso al salir (SPEC 06).
-- [ ] Liberar el modelo en señales distintas de `Ctrl+C` (SPEC 06).
+- [x] ~~Esperar a una transcripción en curso al salir (SPEC 06).~~ (SPEC 15)
+- [x] ~~Liberar el modelo en señales distintas de `Ctrl+C` (SPEC 06).~~ (SPEC 15)
 
 ## Configuración
 

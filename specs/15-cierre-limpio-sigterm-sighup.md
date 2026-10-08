@@ -1,6 +1,6 @@
 # SPEC 15 — Cierre limpio ante `SIGTERM`/`SIGHUP`
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 05, SPEC 06, SPEC 12, SPEC 13, SPEC 14
 > **Fecha:** 2026-10-08
 > **Objetivo:** Hacer que `SIGTERM`, `SIGHUP` y `SIGINT` cierren `speechflow` por la misma ruta limpia: descartar una grabación en curso, esperar (hasta 30 s) a la transcripción o recarga en curso, insertar su texto y liberar el modelo de la GPU.

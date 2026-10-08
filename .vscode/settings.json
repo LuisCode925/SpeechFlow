@@ -3,6 +3,8 @@
         "cuda",
         "cudnn",
         "libcublas",
+        "Realtek",
+        "reconectado",
         "speechflow"
     ]
 }
