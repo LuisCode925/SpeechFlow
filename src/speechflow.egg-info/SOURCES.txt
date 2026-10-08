@@ -1,0 +1,17 @@
+README.md
+pyproject.toml
+src/speechflow/__init__.py
+src/speechflow/__main__.py
+src/speechflow/app.py
+src/speechflow/audio.py
+src/speechflow/config.py
+src/speechflow/inserter.py
+src/speechflow/log.py
+src/speechflow/notifier.py
+src/speechflow/transcriber.py
+src/speechflow.egg-info/PKG-INFO
+src/speechflow.egg-info/SOURCES.txt
+src/speechflow.egg-info/dependency_links.txt
+src/speechflow.egg-info/entry_points.txt
+src/speechflow.egg-info/requires.txt
+src/speechflow.egg-info/top_level.txt

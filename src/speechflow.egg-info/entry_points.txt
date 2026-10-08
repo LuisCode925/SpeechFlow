@@ -1,0 +1,2 @@
+[console_scripts]
+speechflow = speechflow.app:main

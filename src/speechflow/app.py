@@ -381,7 +381,7 @@ def resolve_config(explicit: Path | None) -> Config:
 
 def main() -> None:
     defaults = Config()
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(prog="speechflow", description=__doc__)
     parser.add_argument("--list-devices", action="store_true", help="lista los dispositivos de entrada y termina")
     parser.add_argument("--device", type=parse_device, help=f"índice o nombre del dispositivo de entrada (defecto: el que contenga '{PREFERRED_DEVICE}', si no el del sistema)")
     parser.add_argument("--model", help=f"modelo de faster-whisper (defecto: {defaults.model})")

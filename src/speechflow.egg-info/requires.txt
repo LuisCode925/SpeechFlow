@@ -1,0 +1,5 @@
+faster-whisper
+av<17
+pynput
+sounddevice
+scipy
