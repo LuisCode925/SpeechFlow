@@ -527,14 +527,13 @@ def main() -> None:
     while not closing.wait(1.0) and listener.running:
         pass
     closing.set()  # a partir de aquí una señal cuenta como segunda
-    listener.stop()
-    listener.join()
     if received and received[0] != signal.SIGINT:
         logger.info(f"Señal {signal.Signals(received[0]).name} recibida. Saliendo.")
     else:
         logger.info("Saliendo.")
     push_to_talk.stop_watcher()
     push_to_talk.begin_shutdown()
+    listener.stop()  # sin join: a veces pynput no despierta su hilo tras stop(); es daemon y no retiene el proceso
     if push_to_talk.shutdown():
         logger.info(f"Modelo {model} liberado.")
         notify("SpeechFlow", "Modelo liberado")
