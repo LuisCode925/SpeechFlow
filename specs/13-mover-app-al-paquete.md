@@ -1,6 +1,6 @@
 # SPEC 13 — Mover la app de push-to-talk al paquete
 
-> **Estado:** Aceptado
+> **Estado:** Aprobado
 > **Depende de:** SPEC 04, SPEC 05, SPEC 06, SPEC 07, SPEC 08, SPEC 10, SPEC 11, SPEC 12
 > **Fecha:** 2026-10-07
 > **Objetivo:** Mover la lógica de `scripts/push_to_talk.py` a `src/speechflow/app.py` para que sea importable y testeable, sin cambiar el comportamiento, el CLI ni la salida.
