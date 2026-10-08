@@ -1,1 +1,1 @@
-device = "Realtek Audio USB: Audio (hw:3,0)"
+device = "HD-Audio Generic: ALC1220 Analog (hw:1,0)"
