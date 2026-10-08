@@ -11,10 +11,10 @@ Con `[model] idle_timeout` distinto de 0 (mínimo 30 s) libera el modelo de la G
 en reposo; al pulsar la tecla graba al instante y recarga el modelo en paralelo.
 
 Las opciones (modelo, idioma, teclas, dispositivo, límites de grabación y notificaciones) se pueden
-fijar en un archivo TOML: `--config RUTA`, si no `speechflow.toml` en la raíz del repo, si no
-`~/.config/speechflow/config.toml` (ver `speechflow.example.toml`). Precedencia: CLI > micrófono
-guardado con `--switch-key` en `.speechflow-state.toml` (solo el dispositivo) > archivo > defectos.
-Sin archivo, o con uno inválido, se avisa, se crea la plantilla `speechflow.emergency.toml` y se usan
+fijar en un archivo TOML: `--config RUTA`, si no `$XDG_CONFIG_HOME/speechflow/config.toml` (defecto
+`~/.config/speechflow/config.toml`; ver `speechflow.example.toml`). Precedencia: CLI > micrófono
+guardado con `--switch-key` en `$XDG_STATE_HOME/speechflow/state.toml` (solo el dispositivo) > archivo >
+defectos. Sin archivo, o con uno inválido, se avisa, se crea la plantilla `config.emergency.toml` y se usan
 los defectos.
 """
 import argparse
@@ -31,7 +31,7 @@ import sounddevice as sd
 from pynput import keyboard
 
 from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, device_index, device_name, input_device_by_name, list_devices, next_input_device, parse_device, refresh_devices
-from speechflow.config import CONFIG_FILENAME, REPO_ROOT, STATE_FILENAME, USER_CONFIG_PATH, Config, ConfigError, find_config, load_config, load_state_device, save_state_device, write_emergency
+from speechflow.config import Config, ConfigError, find_config, load_config, load_state_device, save_state_device, user_config_path, write_emergency
 from speechflow.inserter import insert_text
 from speechflow.log import LOGGER_NAME, log_banner, setup_logging
 from speechflow.notifier import notify, set_enabled
@@ -160,8 +160,8 @@ class PushToTalk:
             notify("SpeechFlow", f"Entrada de audio: {name}")
             try:
                 save_state_device(name)
-            except OSError as error:
-                logger.warning(f"No se pudo guardar la entrada de audio en {STATE_FILENAME}: {error}")
+            except (OSError, RuntimeError) as error:
+                logger.warning(f"No se pudo guardar la entrada de audio en state.toml: {error}")
 
     def start_watcher(self, interval: float) -> None:
         """Lanza el hilo que comprueba cada `interval` s que el micrófono seleccionado sigue conectado."""
@@ -369,10 +369,13 @@ def resolve_config(explicit: Path | None) -> Config:
             logger.info(f"Configuración: {path}")
             return config
     else:
-        problem = f"No se encontró {CONFIG_FILENAME} ni {USER_CONFIG_PATH}."
+        try:
+            problem = f"No se encontró {user_config_path()}."
+        except RuntimeError as error:  # sin HOME
+            problem = f"No se encontró el archivo de configuración: {error}."
     try:
-        emergency = f"plantilla en {write_emergency(REPO_ROOT)}"
-    except OSError as error:
+        emergency = f"plantilla en {write_emergency()}"
+    except (OSError, RuntimeError) as error:
         emergency = f"no se pudo crear la plantilla de emergencia: {error}"
     logger.warning(f"{problem} Se usan los valores por defecto; {emergency}.")
     logger.info("Configuración: valores por defecto")
@@ -381,6 +384,10 @@ def resolve_config(explicit: Path | None) -> Config:
 
 def main() -> None:
     defaults = Config()
+    try:
+        config_default = user_config_path()
+    except RuntimeError:  # sin HOME
+        config_default = "~/.config/speechflow/config.toml"
     parser = argparse.ArgumentParser(prog="speechflow", description=__doc__)
     parser.add_argument("--list-devices", action="store_true", help="lista los dispositivos de entrada y termina")
     parser.add_argument("--device", type=parse_device, help=f"índice o nombre del dispositivo de entrada (defecto: el que contenga '{PREFERRED_DEVICE}', si no el del sistema)")
@@ -388,7 +395,7 @@ def main() -> None:
     parser.add_argument("--language", help=f"idioma de la transcripción (defecto: {defaults.language})")
     parser.add_argument("--key", help=f"tecla de disparo, nombre de pynput.keyboard.Key o un carácter (defecto: {defaults.key})")
     parser.add_argument("--switch-key", help=f"tecla de cambio de entrada de audio, mismo formato que --key (defecto: {defaults.switch_key})")
-    parser.add_argument("--config", type=Path, help=f"archivo de configuración TOML (defecto: {CONFIG_FILENAME} en la raíz del repo, si no {USER_CONFIG_PATH})")
+    parser.add_argument("--config", type=Path, help=f"archivo de configuración TOML (defecto: {config_default})")
     args = parser.parse_args()
 
     if args.list_devices:
