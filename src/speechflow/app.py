@@ -39,6 +39,8 @@ from speechflow.transcriber import COMPUTE_TYPE, SAMPLE_RATE, Transcriber
 
 logger = logging.getLogger(LOGGER_NAME)
 
+SHUTDOWN_TIMEOUT = 30.0  # segundos máximos de espera al cerrar
+
 
 class State(Enum):
     IDLE = "idle"
@@ -306,13 +308,25 @@ class PushToTalk:
             self.state = State.IDLE
         logger.info("Grabación descartada por cierre.")
 
-    def shutdown(self) -> bool:
-        """Cancela el temporizador, espera a una recarga en curso y libera el modelo. True si había uno cargado."""
+    def shutdown(self, timeout: float = SHUTDOWN_TIMEOUT) -> bool:
+        """Cancela el temporizador, espera (hasta `timeout` s en total) a la transcripción y a la recarga en curso y libera el modelo.
+
+        True si liberó el modelo. Si la transcripción sigue viva al vencer el plazo, avisa y devuelve False sin cerrarlo.
+        """
         with self._lock:
             self._cancel_idle_timer()
-            loader = self._loader
+            worker, loader = self._worker, self._loader
+        deadline = time.monotonic() + timeout
+        if worker is not None and worker.is_alive():
+            logger.info(f"Esperando a la transcripción en curso (máximo {timeout:g} s)...")
+            worker.join(max(0.0, deadline - time.monotonic()))  # fuera del lock: el hilo lo necesita para terminar
+            if worker.is_alive():
+                logger.warning(f"La transcripción no terminó en {timeout:g} s; se sale sin liberar el modelo.")
+                return False
         if loader is not None:
-            loader.join()  # fuera del lock: la carga lo necesita para publicar el modelo
+            loader.join(max(0.0, deadline - time.monotonic()))  # fuera del lock: la carga lo necesita para publicar el modelo
+            if loader.is_alive():
+                return False  # sin modelo publicado que cerrar; el sistema libera lo demás al terminar
         with self._lock:
             transcriber, self.transcriber = self.transcriber, None
         if transcriber is None:
