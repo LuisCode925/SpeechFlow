@@ -1,6 +1,6 @@
 # SPEC 16 — Tests con `pytest`
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 04, SPEC 05, SPEC 10, SPEC 11, SPEC 12, SPEC 14, SPEC 15
 > **Fecha:** 2026-10-08
 > **Objetivo:** Añadir una suite de `pytest` que cubra `config`, `audio`, `log`, `notifier`, `inserter`, `transcriber`, los helpers de `app.py` y `PushToTalk` con dobles, sin hardware ni GPU por defecto, y con el smoke test de GPU marcado y excluido.

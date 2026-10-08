@@ -33,7 +33,7 @@ conda env create -f environment.yml
 conda activate speechflow
 ```
 
-El entorno incluye Python 3.12, `sounddevice` (con `portaudio`), `scipy`, y cuBLAS y cuDNN (CUDA 12) desde conda-forge; el resto de dependencias (`faster-whisper`, `av<17`, `pynput`) y el propio paquete se instalan con `pip install -e .` (declarado en `environment.yml` y `pyproject.toml`). Eso deja el comando `speechflow` en el `PATH` del entorno, que debe estar activado. En un entorno existente: `pip install -e .`.
+El entorno incluye Python 3.12, `sounddevice` (con `portaudio`), `scipy`, y cuBLAS y cuDNN (CUDA 12) desde conda-forge; el resto de dependencias (`faster-whisper`, `av<17`, `pynput`) y el propio paquete se instalan con `pip install -e .[dev]` (declarado en `environment.yml` y `pyproject.toml`; el extra `dev` añade `pytest`). Eso deja el comando `speechflow` en el `PATH` del entorno, que debe estar activado. En un entorno existente: `pip install -e .[dev]` (o `pip install -e .` sin las herramientas de desarrollo).
 
 Para comprobar que la GPU es visible:
 
@@ -271,3 +271,17 @@ Opciones:
 - **Remuestreo:** en este equipo los dispositivos `hw:` de ALSA rechazan 16 kHz (`Invalid sample rate`) y solo aceptan su tasa nativa (44 100 Hz). Por eso el script graba a esa tasa y remuestrea a 16 kHz con `scipy.signal.resample_poly`. El WAV final es mono, 16 kHz, 16 bits, el formato nativo de Whisper descrito arriba.
 - **Aviso de silencio:** si el pico es menor a 0.01 se avisa por stderr (posible micrófono mudo o equivocado). El ruido de fondo de un micrófono real puede superar ese umbral, así que el aviso solo detecta dispositivos casi mudos (p. ej. un `Loopback`).
 - **Latencia:** la transcripción se mide sin contar la carga del modelo (hay un calentamiento previo). Con `medium` int8 en la GTX 1060, ~16 s de audio tardaron 1.26 s. El modelo se carga después de grabar, así que hay una espera antes de ver el texto.
+
+## Desarrollo y tests
+
+Con el extra `dev` instalado (`pip install -e .[dev]`) y el entorno `speechflow` activado:
+
+```bash
+pytest                # suite por defecto: sin micrófono, GPU, xdotool ni notify-send
+pytest -m gpu         # smoke test con el modelo real
+env -u DISPLAY pytest # sin servidor X (por ejemplo, en una terminal o un contenedor)
+```
+
+- **Suite por defecto:** cubre `config`, `audio`, `log`, `notifier`, `inserter`, `transcriber`, los helpers de `app.py` y `PushToTalk`, con dobles de `sounddevice`, `Recorder`, `Transcriber`, `notify` e `insert_text`. Ninguna prueba abre un micrófono, ejecuta `xdotool` o `notify-send`, ni carga un modelo. `HOME`, `XDG_CONFIG_HOME` y `XDG_STATE_HOME` apuntan a una carpeta temporal en cada test, así que la configuración real no se toca. Tarda unos segundos. Quedan fuera `main()` y las pruebas de integración con hardware, que se verifican a mano.
+- **Smoke test de GPU (`pytest -m gpu`):** los tests marcados `gpu` se excluyen por defecto (`addopts = "-m 'not gpu'"` en `pyproject.toml`). El único que hay carga `Transcriber()` con el modelo por defecto (`medium`), transcribe un segundo de silencio y llama a `close()` dos veces. Requiere una GPU NVIDIA con CUDA y el modelo `medium` ya descargado en la caché de Hugging Face.
+- **Sin servidor X:** si `DISPLAY` no está definido, `tests/conftest.py` fija `PYNPUT_BACKEND=dummy` antes de importar `speechflow.app`. Con ese backend todas las teclas de `pynput.keyboard.Key` valen lo mismo, así que los tests de `parse_key` que lo necesitan se saltan; el resto pasa.
