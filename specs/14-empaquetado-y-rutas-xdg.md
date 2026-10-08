@@ -1,6 +1,6 @@
 # SPEC 14 — Empaquetado, comando `speechflow` y rutas XDG
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 10, SPEC 13
 > **Fecha:** 2026-10-07
 > **Objetivo:** Hacer el proyecto instalable con `pyproject.toml`, arrancable con el comando `speechflow` y con `python -m speechflow`, y mover la configuración, el estado y la plantilla de emergencia de la raíz del repo a las rutas XDG del usuario.

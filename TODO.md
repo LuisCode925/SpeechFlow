@@ -64,3 +64,9 @@ Fase 3 (después): servicio `systemd` de usuario, archivo de log con rotación y
 
 - [x] ~~Empaquetado (`pyproject.toml`) y `python -m speechflow` (SPEC 04, 05).~~ (SPEC 14)
 - [ ] Tests con `pytest` (SPEC 04, 05).
+
+## Criterios de aceptación pendientes de verificar (SPEC 14)
+
+- [ ] `conda env create -f environment.yml` en un entorno limpio instala el paquete y deja `speechflow` en el `PATH` del entorno.
+- [ ] `scripts/benchmark_stt.py` no cambia y produce la misma salida que antes (`git diff main -- scripts/benchmark_stt.py` vacío).
+- [ ] La vigilancia del micrófono, la descarga por inactividad y la salida con `Ctrl+C` producen los mismos mensajes y notificaciones que antes, salvo las rutas.
