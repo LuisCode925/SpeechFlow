@@ -8,13 +8,6 @@ from pathlib import Path
 
 from speechflow.transcriber import DEFAULT_LANGUAGE, DEFAULT_MODEL
 
-CONFIG_FILENAME = "speechflow.toml"
-USER_CONFIG_PATH = Path("~/.config/speechflow/config.toml")  # se expande con expanduser()
-EMERGENCY_FILENAME = "speechflow.emergency.toml"
-STATE_FILENAME = ".speechflow-state.toml"
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-
 logger = logging.getLogger("speechflow")
 
 
@@ -50,19 +43,43 @@ _SCHEMA: dict[str, dict[str, tuple[tuple[type, ...], str]]] = {
 }
 
 
+def _xdg_dir(variable: str, default: str) -> Path:
+    """`$variable/speechflow` si es una ruta absoluta; si no, `~/default/speechflow`. RuntimeError sin HOME."""
+    value = os.environ.get(variable, "")
+    if value and Path(value).is_absolute():
+        return Path(value) / "speechflow"
+    return Path(default).expanduser() / "speechflow"
+
+
+def config_dir() -> Path:
+    return _xdg_dir("XDG_CONFIG_HOME", "~/.config")
+
+
+def state_dir() -> Path:
+    return _xdg_dir("XDG_STATE_HOME", "~/.local/state")
+
+
+def user_config_path() -> Path:
+    return config_dir() / "config.toml"
+
+
+def emergency_path() -> Path:
+    return config_dir() / "config.emergency.toml"
+
+
+def state_path() -> Path:
+    return state_dir() / "state.toml"
+
+
 def find_config(explicit: Path | None) -> Path | None:
-    """Devuelve el primer archivo que exista (--config, raíz del repo, XDG), o None si no hay ninguno."""
+    """Devuelve --config o el archivo de usuario si existen, o None si no hay ninguno."""
     if explicit is not None:
         return explicit if explicit.is_file() else None
-    candidates = [REPO_ROOT / CONFIG_FILENAME]
     try:
-        candidates.append(USER_CONFIG_PATH.expanduser())
+        path = user_config_path()
     except RuntimeError:  # sin HOME
-        pass
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    return None
+        return None
+    return path if path.is_file() else None
 
 
 def load_config(path: Path) -> Config:
@@ -108,8 +125,8 @@ def load_config(path: Path) -> Config:
 def _emergency_template() -> str:
     d = Config()
     return (
-        "# speechflow.emergency.toml — plantilla con los valores por defecto.\n"
-        "# El script no la lee: cópiala o renómbrala a speechflow.toml para usarla.\n"
+        "# config.emergency.toml — plantilla con los valores por defecto.\n"
+        "# El script no la lee: cópiala o renómbrala a config.toml para usarla.\n"
         "[model]\n"
         f"name = {json.dumps(d.model)}\n"
         f"language = {json.dumps(d.language)}\n"
@@ -132,9 +149,10 @@ def _emergency_template() -> str:
     )
 
 
-def write_emergency(directory: Path) -> Path:
-    """Crea EMERGENCY_FILENAME con los defectos en `directory`; si ya existe no lo toca. Devuelve la ruta."""
-    path = directory / EMERGENCY_FILENAME
+def write_emergency() -> Path:
+    """Crea la plantilla con los defectos en emergency_path() (y su carpeta); si ya existe no la toca. Devuelve la ruta."""
+    path = emergency_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
     try:
         with path.open("x", encoding="utf-8") as f:
             f.write(_emergency_template())
@@ -145,11 +163,11 @@ def write_emergency(directory: Path) -> Path:
 
 def load_state_device() -> str | None:
     """Nombre del dispositivo guardado, o None si no hay archivo de estado o es ilegible."""
-    path = REPO_ROOT / STATE_FILENAME
     try:
+        path = state_path()
         with path.open("rb") as f:
             device = tomllib.load(f).get("device")
-    except FileNotFoundError:
+    except (FileNotFoundError, RuntimeError):  # sin archivo o sin HOME
         return None
     except (OSError, tomllib.TOMLDecodeError) as e:
         logger.warning("Archivo de estado ilegible en %s: %s. Se ignora.", path, e)
@@ -161,8 +179,9 @@ def load_state_device() -> str | None:
 
 
 def save_state_device(name: str) -> None:
-    """Guarda el nombre del dispositivo en STATE_FILENAME (archivo temporal + os.replace)."""
-    path = REPO_ROOT / STATE_FILENAME
+    """Guarda el nombre del dispositivo en state_path(), creando la carpeta (archivo temporal + os.replace)."""
+    path = state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     tmp.write_text(f"device = {json.dumps(name)}\n", encoding="utf-8")
     os.replace(tmp, path)
