@@ -15,6 +15,9 @@ dependencies = [
     "scipy",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest"]
+
 [project.scripts]
 speechflow = "speechflow.app:main"
 
@@ -23,3 +26,8 @@ version = { attr = "speechflow.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not gpu'"
+markers = ["gpu: usa la GPU y el modelo real; se excluye por defecto, ejecutar con `pytest -m gpu`"]
