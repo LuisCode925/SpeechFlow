@@ -1,10 +1,14 @@
 """Aislamiento común de la suite: sin HOME real, sin subprocesos reales y sin servidor X obligatorio."""
 import os
 import subprocess
+from pathlib import Path
 
 # Debe fijarse antes de importar speechflow.app (pynput falla sin X).
 if not os.environ.get("DISPLAY"):
     os.environ.setdefault("PYNPUT_BACKEND", "dummy")
+
+# La caché de Hugging Face es del HOME real: el test gpu la necesita aunque HOME se aísle por test.
+os.environ.setdefault("HF_HOME", str(Path.home() / ".cache" / "huggingface"))
 
 import pytest
 
