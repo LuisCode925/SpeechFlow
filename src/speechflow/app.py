@@ -72,6 +72,8 @@ class PushToTalk:
         self.idle_timeout = idle_timeout  # 0 = no se libera nunca
         self._idle_timer: threading.Timer | None = None
         self._loader: threading.Thread | None = None  # hilo de recarga en curso
+        self._worker: threading.Thread | None = None  # hilo de transcripción en curso
+        self._closing = False  # True desde begin_shutdown(); las teclas se ignoran
         self._load_error: Exception | None = None  # fallo de la última recarga
         self.state = State.IDLE
         self._held = False  # la tecla sigue pulsada; filtra las repeticiones automáticas
@@ -84,6 +86,8 @@ class PushToTalk:
         self._arm_idle_timer()
 
     def on_press(self, key) -> None:
+        if self._closing:
+            return
         if key == self.switch_key:
             with self._lock:
                 was_held, self._switch_held = self._switch_held, True
@@ -120,6 +124,8 @@ class PushToTalk:
             logger.info(f"Modelo descargado: se carga {self.model_name} mientras grabas.")
 
     def on_release(self, key) -> None:
+        if self._closing:
+            return
         if key == self.switch_key:
             with self._lock:
                 self._switch_held = False
@@ -133,6 +139,8 @@ class PushToTalk:
     def switch_device(self) -> None:
         """Pasa al siguiente dispositivo de entrada; solo en IDLE, nunca con un stream abierto."""
         with self._lock:
+            if self._closing:
+                return
             if self.state is not State.IDLE:
                 logger.warning("No se cambia la entrada de audio mientras se graba o se transcribe.")
                 return
@@ -236,7 +244,8 @@ class PushToTalk:
         if timed_out:
             logger.warning(f"Límite de {self.max_seconds:g} s alcanzado; suelta la tecla y vuelve a pulsarla para otro dictado.")
         logger.info(f"Grabación terminada: {seconds:.2f} s. Transcribiendo con {self.model_name}/{self.language}...")
-        threading.Thread(target=self._transcribe_and_insert, args=(audio,), daemon=True).start()
+        self._worker = threading.Thread(target=self._transcribe_and_insert, args=(audio,), daemon=True)
+        self._worker.start()
 
     def _load_model(self) -> None:
         """Cuerpo del hilo de recarga: carga el modelo fuera del lock y lo publica, o guarda el error."""
@@ -283,6 +292,20 @@ class PushToTalk:
                 self.state = State.IDLE
                 self._arm_idle_timer()
 
+    def begin_shutdown(self) -> None:
+        """Marca el cierre (las teclas dejan de tener efecto) y descarta una grabación en curso sin transcribirla."""
+        with self._lock:
+            self._closing = True
+            self._cancel_idle_timer()
+            if self.state is not State.RECORDING:
+                return
+            if self._timer is not None:
+                self._timer.cancel()
+                self._timer = None
+            self.recorder.stop()
+            self.state = State.IDLE
+        logger.info("Grabación descartada por cierre.")
+
     def shutdown(self) -> bool:
         """Cancela el temporizador, espera a una recarga en curso y libera el modelo. True si había uno cargado."""
         with self._lock:
@@ -306,7 +329,7 @@ class PushToTalk:
     def _arm_idle_timer(self) -> None:
         """Rearma la cuenta de inactividad; llamar con el lock tomado. No hace nada si idle_timeout == 0 o no hay modelo."""
         self._cancel_idle_timer()
-        if self.idle_timeout == 0 or self.transcriber is None:
+        if self.idle_timeout == 0 or self.transcriber is None or self._closing:
             return
         self._idle_timer = threading.Timer(self.idle_timeout, self._unload_model)
         self._idle_timer.daemon = True
