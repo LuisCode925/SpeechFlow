@@ -39,3 +39,88 @@ def restaurar_notifier():
     """notifier vuelve a su estado inicial (activado) tras cada test."""
     yield
     notifier.set_enabled(True)
+
+
+# --- Doble de sounddevice -------------------------------------------------------------------
+
+import numpy as np
+import sounddevice as sd
+
+
+def dispositivo(nombre, entradas=1, tasa=48000):
+    return {"name": nombre, "max_input_channels": entradas, "max_output_channels": 2, "default_samplerate": float(tasa)}
+
+
+class InputStreamFalso:
+    """Sustituye a sd.InputStream: no abre hardware; `alimentar` simula el callback de PortAudio."""
+
+    instancias: list["InputStreamFalso"] = []
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.callback = kwargs["callback"]
+        self.active = False
+        self.cerrado = False
+        self.falla_al_parar = False
+        InputStreamFalso.instancias.append(self)
+
+    def start(self):
+        self.active = True
+
+    def stop(self):
+        if self.falla_al_parar:
+            raise sd.PortAudioError("stream caído")
+        self.active = False
+
+    def close(self):
+        self.cerrado = True
+        self.active = False
+
+    def alimentar(self, datos, status=None):
+        self.callback(datos, len(datos), None, status)
+
+
+class SoundDeviceFalso:
+    """Estado del doble de sounddevice; los tests modifican `dispositivos` y `defecto`."""
+
+    def __init__(self):
+        self.dispositivos = [dispositivo("HDA Intel: salida", entradas=0), dispositivo("Realtek ALC", 2), dispositivo("USB Mic")]
+        self.defecto = 1
+        self.con_index = True
+        self.reinicios = 0
+
+    def query_devices(self, device=None, kind=None):
+        if device is None and kind is None:
+            return [dict(d, index=i) if self.con_index else dict(d) for i, d in enumerate(self.dispositivos)]
+        if device is None:
+            device = self.defecto
+        if isinstance(device, str):
+            coincidencias = [i for i, d in enumerate(self.dispositivos) if device.lower() in d["name"].lower()]
+            if not coincidencias:
+                raise ValueError(f"No input device matching {device!r}")
+            device = coincidencias[0]
+        if not 0 <= device < len(self.dispositivos):
+            raise sd.PortAudioError("Error querying device")
+        info = self.dispositivos[device]
+        if kind == "input" and info["max_input_channels"] <= 0:
+            raise sd.PortAudioError("Invalid input device")
+        return dict(info, index=device) if self.con_index else dict(info)
+
+    def _terminate(self):
+        self.reinicios += 1
+
+    def _initialize(self):
+        pass
+
+
+@pytest.fixture(autouse=True)
+def sounddevice_falso(monkeypatch):
+    """Ningún test ve ni abre dispositivos de audio reales."""
+    falso = SoundDeviceFalso()
+    InputStreamFalso.instancias = []
+    monkeypatch.setattr(sd, "query_devices", falso.query_devices)
+    monkeypatch.setattr(sd, "_terminate", falso._terminate)
+    monkeypatch.setattr(sd, "_initialize", falso._initialize)
+    monkeypatch.setattr(sd, "InputStream", InputStreamFalso)
+    monkeypatch.setattr(sd.default, "device", (falso.defecto, None))
+    return falso
