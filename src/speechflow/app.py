@@ -21,6 +21,7 @@ import argparse
 import logging
 import os
 import shutil
+import signal
 import sys
 import threading
 import time
@@ -507,12 +508,33 @@ def main() -> None:
 
     push_to_talk = PushToTalk(key, switch_key, device, transcriber, model, language, config.min_seconds, config.max_seconds, config.idle_timeout)
     push_to_talk.start_watcher(config.watch_interval)
-    try:
-        with keyboard.Listener(on_press=push_to_talk.on_press, on_release=push_to_talk.on_release) as listener:
-            listener.join()
-    except KeyboardInterrupt:
+    listener = keyboard.Listener(on_press=push_to_talk.on_press, on_release=push_to_talk.on_release)
+    closing = threading.Event()  # la primera señal lo marca; una segunda fuerza la salida
+    received: list[int] = []
+
+    def on_signal(signum, frame) -> None:
+        """Solo marca el cierre; el hilo principal detiene el listener y hace el log y el cierre."""
+        if closing.is_set():
+            logger.warning("Segunda señal recibida; salida inmediata.")
+            os._exit(0)
+        received.append(signum)
+        closing.set()
+
+    for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        signal.signal(signum, on_signal)
+    listener.start()
+    # listener.stop() desde el manejador no hace volver a listener.join() (probado); se espera al evento y se detiene aquí
+    while not closing.wait(1.0) and listener.running:
+        pass
+    closing.set()  # a partir de aquí una señal cuenta como segunda
+    listener.stop()
+    listener.join()
+    if received and received[0] != signal.SIGINT:
+        logger.info(f"Señal {signal.Signals(received[0]).name} recibida. Saliendo.")
+    else:
         logger.info("Saliendo.")
-        push_to_talk.stop_watcher()
-        if push_to_talk.shutdown():
-            logger.info(f"Modelo {model} liberado.")
-            notify("SpeechFlow", "Modelo liberado")
+    push_to_talk.stop_watcher()
+    push_to_talk.begin_shutdown()
+    if push_to_talk.shutdown():
+        logger.info(f"Modelo {model} liberado.")
+        notify("SpeechFlow", "Modelo liberado")
