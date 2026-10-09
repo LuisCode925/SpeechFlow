@@ -14,6 +14,32 @@ Orden y dependencias: 13 → 14 → 15 → 16.
 
 Fase 3 (después): servicio `systemd` de usuario y bandeja del sistema.
 
+## Fase 3 — Antes de la GUI (roadmap)
+
+Orden recomendado: 1 → 2 → 4 → 8 → 10 → 9. La GUI será una capa fina sobre estado, historial y canal de control. Los ítems 1, 2, 3, 4, 5, 9 y 11 repiten ideas de las secciones de abajo; al implementarlos, márcalos en ambos sitios.
+
+Alto valor, esfuerzo bajo:
+
+- [ ] 1. VAD (`vad_filter` de `faster-whisper`, Silero) y recorte de silencios: menos alucinaciones en silencio y transcripción más rápida.
+- [ ] 2. Cambio de idioma en caliente (es/en) con tecla nueva en `[keys]`, y detección automática de idioma como modo opcional.
+- [ ] 3. Opciones `--quiet` / `--verbose` y niveles de log configurables.
+- [ ] 4. Modo toggle (pulsar para empezar, pulsar para parar), para dictados largos.
+
+Valor medio:
+
+- [ ] 5. Inserción por portapapeles (Ctrl+V), más robusta que `xdotool type` con acentos y caracteres raros; restaurar el portapapeles después.
+- [ ] 6. Diccionario de reemplazos del usuario (`[replacements]` en TOML) e `initial_prompt` configurable para sesgar el vocabulario.
+- [ ] 7. Comandos de voz de puntuación ("punto", "coma", "nueva línea").
+- [ ] 8. Historial de transcripciones (JSONL en `state_dir()`); la GUI lo necesitará y permite recuperar un dictado perdido.
+
+Base para la GUI:
+
+- [ ] 9. Daemon y servicio `systemd` de usuario (la GUI o bandeja será cliente del proceso).
+- [ ] 10. Canal de control (socket Unix o señales): pausar, cambiar idioma o dispositivo, consultar estado. Es la dependencia real de la GUI.
+- [ ] 11. Fallback a CPU si falla CUDA, para que el servicio no muera al arrancar.
+
+Pueden esperar: soporte Wayland y reducción de ruido.
+
 ## Audio y captura
 
 - [ ] VAD (detección de actividad de voz) y recorte de silencios (SPEC 01, 03, 04, 05).
