@@ -258,3 +258,48 @@ class TestEstado:
         assert destino == config.state_path() and origen != destino and origen.suffix == ".tmp"
         assert [p.name for p in destino.parent.iterdir()] == ["state.toml"]
         assert tomllib.loads(destino.read_text()) == {"device": "x"}
+
+    def test_idioma_ida_y_vuelta(self):
+        config.save_state_language("auto")
+        assert config.load_state_language() == "auto"
+
+    def test_idioma_sin_archivo(self):
+        assert config.load_state_language() is None
+
+    def test_guardar_idioma_conserva_device(self):
+        config.save_state_device("Micro")
+        config.save_state_language("en")
+        assert tomllib.loads(config.state_path().read_text()) == {"device": "Micro", "language": "en"}
+
+    def test_guardar_device_conserva_idioma(self):
+        config.save_state_language("en")
+        config.save_state_device("Micro")
+        assert tomllib.loads(config.state_path().read_text()) == {"device": "Micro", "language": "en"}
+
+    @pytest.mark.parametrize("texto", ["language = 3\n", 'language = ""\n'])
+    def test_idioma_invalido(self, caplog, texto):
+        config.state_path().parent.mkdir(parents=True)
+        config.state_path().write_text(texto)
+        with caplog.at_level("WARNING", logger="speechflow"):
+            assert config.load_state_language() is None
+        assert "language debe ser texto" in caplog.text
+
+    def test_idioma_archivo_ilegible(self, caplog):
+        config.state_path().parent.mkdir(parents=True)
+        config.state_path().write_text("language = [\n")
+        with caplog.at_level("WARNING", logger="speechflow"):
+            assert config.load_state_language() is None
+        assert "Archivo de estado ilegible" in caplog.text
+
+    def test_guardar_sobre_archivo_ilegible(self):
+        """Un state.toml ilegible se sobrescribe solo con la clave que se guarda."""
+        config.state_path().parent.mkdir(parents=True)
+        config.state_path().write_text("device = [\n")
+        config.save_state_language("es")
+        assert tomllib.loads(config.state_path().read_text()) == {"language": "es"}
+
+    def test_guardar_ignora_valores_no_texto(self):
+        config.state_path().parent.mkdir(parents=True)
+        config.state_path().write_text('device = 3\nlanguage = "en"\n')
+        config.save_state_language("es")
+        assert tomllib.loads(config.state_path().read_text()) == {"language": "es"}

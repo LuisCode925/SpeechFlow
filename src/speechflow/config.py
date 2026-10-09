@@ -177,27 +177,55 @@ def write_emergency() -> Path:
     return path
 
 
-def load_state_device() -> str | None:
-    """Nombre del dispositivo guardado, o None si no hay archivo de estado o es ilegible."""
+def _load_state_text(key: str, allow_empty: bool) -> str | None:
+    """Valor de texto de `key` en state.toml, o None si falta, es inválido o el archivo es ilegible."""
     try:
         path = state_path()
         with path.open("rb") as f:
-            device = tomllib.load(f).get("device")
+            value = tomllib.load(f).get(key)
     except (FileNotFoundError, RuntimeError):  # sin archivo o sin HOME
         return None
     except (OSError, tomllib.TOMLDecodeError) as e:
         logger.warning("Archivo de estado ilegible en %s: %s. Se ignora.", path, e)
         return None
-    if device is not None and not isinstance(device, str):
-        logger.warning("Archivo de estado inválido en %s: device debe ser texto. Se ignora.", path)
+    if value is not None and (not isinstance(value, str) or (not allow_empty and not value)):
+        logger.warning("Archivo de estado inválido en %s: %s debe ser texto%s. Se ignora.", path, key, "" if allow_empty else " no vacío")
         return None
-    return device
+    return value
+
+
+def load_state_device() -> str | None:
+    """Nombre del dispositivo guardado, o None si no hay archivo de estado o es ilegible."""
+    return _load_state_text("device", allow_empty=True)
+
+
+def load_state_language() -> str | None:
+    """Idioma guardado ("es", "en", "auto", ...), o None si falta o es inválido."""
+    return _load_state_text("language", allow_empty=False)
+
+
+def _save_state_key(key: str, value: str) -> None:
+    """Cambia `key` en state_path() conservando las demás claves de texto (archivo temporal + os.replace)."""
+    path = state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    current: dict[str, str] = {}
+    try:
+        with path.open("rb") as f:
+            data = tomllib.load(f)
+        current = {k: v for k in ("device", "language") if isinstance(v := data.get(k), str)}
+    except (OSError, tomllib.TOMLDecodeError):  # ausente o ilegible: se escribe solo la clave nueva
+        pass
+    current[key] = value
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp.write_text("".join(f"{k} = {json.dumps(v)}\n" for k, v in current.items()), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def save_state_device(name: str) -> None:
-    """Guarda el nombre del dispositivo en state_path(), creando la carpeta (archivo temporal + os.replace)."""
-    path = state_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(f"device = {json.dumps(name)}\n", encoding="utf-8")
-    os.replace(tmp, path)
+    """Guarda el nombre del dispositivo en state_path(), conservando `language`."""
+    _save_state_key("device", name)
+
+
+def save_state_language(language: str) -> None:
+    """Guarda el idioma en state_path(), conservando `device`."""
+    _save_state_key("language", language)
