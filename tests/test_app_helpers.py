@@ -31,6 +31,65 @@ class TestParseKey:
             app.parse_key("nada")
 
 
+class TestParseHotkeys:
+    def test_cuatro_teclas_distintas(self):
+        r, f8, f7, f6 = app.parse_hotkeys("ctrl_r", "f8", "f7", "f6")
+        assert (r, f8, f7, f6) == (keyboard.Key.ctrl_r, keyboard.Key.f8, keyboard.Key.f7, keyboard.Key.f6)
+
+    @pytest.mark.parametrize(
+        "nombres, esperado",
+        [
+            (("a", "a", "f7", "f6"), "--key y --switch-key"),
+            (("a", "f8", "a", "f6"), "--key y [keys] language"),
+            (("a", "f8", "f7", "a"), "--key y [keys] auto"),
+            (("ctrl_r", "f8", "f8", "f6"), "--switch-key y [keys] language"),
+            (("ctrl_r", "f8", "f7", "f8"), "--switch-key y [keys] auto"),
+            (("ctrl_r", "f8", "f7", "f7"), "[keys] language y [keys] auto"),
+        ],
+    )
+    def test_teclas_repetidas_nombran_las_dos(self, nombres, esperado):
+        with pytest.raises(ValueError, match="no pueden ser la misma tecla") as e:
+            app.parse_hotkeys(*nombres)
+        assert esperado in str(e.value)
+
+    @pytest.mark.parametrize(
+        "nombres, esperado",
+        [
+            (("nada", "f8", "f7", "f6"), "Error con --key"),
+            (("ctrl_r", "nada", "f7", "f6"), "Error con --switch-key"),
+            (("ctrl_r", "f8", "nada", "f6"), "Error con [keys] language: tecla desconocida 'nada'"),
+            (("ctrl_r", "f8", "f7", "nada"), "Error con [keys] auto: tecla desconocida 'nada'"),
+        ],
+    )
+    def test_tecla_desconocida_nombra_la_clave(self, nombres, esperado):
+        with pytest.raises(ValueError, match="tecla desconocida") as e:
+            app.parse_hotkeys(*nombres)
+        assert esperado in str(e.value)
+
+
+class TestResolveLanguage:
+    def test_sin_nada_usa_el_de_config(self):
+        assert app.resolve_language(None, "es") == "es"
+
+    def test_estado_gana_sobre_config(self):
+        config.save_state_language("auto")
+        assert app.resolve_language(None, "es") == "auto"
+
+    def test_cli_gana_sobre_estado_y_config(self):
+        config.save_state_language("auto")
+        assert app.resolve_language("en", "fr") == "en"
+
+    def test_cli_auto(self):
+        assert app.resolve_language("auto", "es") == "auto"
+
+    def test_estado_invalido_se_ignora(self, caplog):
+        config.state_path().parent.mkdir(parents=True)
+        config.state_path().write_text("language = 3\n")
+        with caplog.at_level("WARNING", logger="speechflow"):
+            assert app.resolve_language(None, "fr") == "fr"
+        assert "language debe ser texto" in caplog.text
+
+
 class TestDescribeDevice:
     def test_defecto(self):
         assert app.describe_device(None) == f"[1] Realtek ALC | 48000 Hz nativos a {SAMPLE_RATE} Hz mono"

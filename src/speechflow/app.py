@@ -32,7 +32,7 @@ import sounddevice as sd
 from pynput import keyboard
 
 from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, device_index, device_name, input_device_by_name, list_devices, next_input_device, parse_device, refresh_devices
-from speechflow.config import Config, ConfigError, find_config, load_config, load_state_device, save_state_device, save_state_language, user_config_path, write_emergency
+from speechflow.config import Config, ConfigError, find_config, load_config, load_state_device, load_state_language, save_state_device, save_state_language, user_config_path, write_emergency
 from speechflow.inserter import insert_text
 from speechflow.log import LOGGER_NAME, log_banner, setup_logging
 from speechflow.notifier import notify, set_enabled
@@ -437,6 +437,30 @@ def parse_key(name: str) -> keyboard.Key | keyboard.KeyCode:
         raise ValueError(f"tecla desconocida {name!r}; usa un nombre de pynput.keyboard.Key (ctrl_r, f9, ...) o un carácter") from None
 
 
+def parse_hotkeys(record: str, switch: str, language: str, auto: str) -> tuple[keyboard.Key | keyboard.KeyCode, ...]:
+    """Convierte las cuatro teclas (record, switch, language, auto) y exige que sean distintas. ValueError con el motivo."""
+    labelled = [("--key", record), ("--switch-key", switch), ("[keys] language", language), ("[keys] auto", auto)]
+    keys = []
+    for label, name in labelled:
+        try:
+            keys.append(parse_key(name))
+        except ValueError as error:
+            raise ValueError(f"Error con {label}: {error}") from None
+    for i, (label_a, name_a) in enumerate(labelled):
+        for j in range(i + 1, len(labelled)):
+            if keys[i] == keys[j]:
+                raise ValueError(f"{label_a} y {labelled[j][0]} no pueden ser la misma tecla ({name_a!r}).")
+    return tuple(keys)
+
+
+def resolve_language(cli_language: str | None, config_language: str) -> str:
+    """Idioma inicial: --language > state.toml > [model] language."""
+    if cli_language is not None:
+        return cli_language
+    saved = load_state_language()
+    return saved if saved is not None else config_language
+
+
 def describe_device(device: int | str | None) -> str:
     """Texto `[índice] nombre | tasa Hz nativos a SAMPLE_RATE Hz mono` del dispositivo de entrada."""
     info = sd.query_devices(device, "input")
@@ -508,7 +532,7 @@ def main() -> None:
     config = resolve_config(args.config)
     # CLI > archivo > defectos; un argumento solo cuenta si se escribió (defecto None)
     model = args.model if args.model is not None else config.model
-    language = args.language if args.language is not None else config.language
+    language = resolve_language(args.language, config.language)
     key_name = args.key if args.key is not None else config.key
     switch_key_name = args.switch_key if args.switch_key is not None else config.switch_key
 
@@ -522,17 +546,11 @@ def main() -> None:
         logger.warning("Aviso: falta notify-send (sudo apt install libnotify-bin); solo habrá mensajes por consola.")
 
     try:
-        key = parse_key(key_name)
+        key, switch_key, language_key, auto_key = parse_hotkeys(
+            key_name, switch_key_name, config.language_key, config.auto_key
+        )
     except ValueError as error:
-        logger.error(f"Error con --key: {error}")
-        sys.exit(1)
-    try:
-        switch_key = parse_key(switch_key_name)
-    except ValueError as error:
-        logger.error(f"Error con --switch-key: {error}")
-        sys.exit(1)
-    if switch_key == key:
-        logger.error(f"--switch-key y --key no pueden ser la misma tecla ({key_name!r}).")
+        logger.error(str(error))
         sys.exit(1)
 
     # --device > estado guardado > [audio] device > default_device()
@@ -567,9 +585,10 @@ def main() -> None:
     logger.info(f"Modelo: {model} | idioma: {language} | compute_type: {COMPUTE_TYPE} | GPU | VAD: {'sí' if config.vad else 'no'}")
     logger.info(f"Dispositivo de audio: {describe_device(device)}")
     logger.info(f"Cambio de entrada de audio: tecla {switch_key_name!r}.")
+    logger.info(f"Cambio de idioma: tecla {config.language_key!r}; modo automático: tecla {config.auto_key!r}.")
     logger.info(f"Listo. Mantén pulsada la tecla {key_name!r} para dictar. Ctrl+C para salir.")
 
-    push_to_talk = PushToTalk(key, switch_key, device, transcriber, model, language, config.min_seconds, config.max_seconds, config.idle_timeout, config.vad)
+    push_to_talk = PushToTalk(key, switch_key, device, transcriber, model, language, config.min_seconds, config.max_seconds, config.idle_timeout, config.vad, language_key, auto_key)
     push_to_talk.start_watcher(config.watch_interval)
     listener = keyboard.Listener(on_press=push_to_talk.on_press, on_release=push_to_talk.on_release)
     closing = threading.Event()  # la primera señal lo marca; una segunda fuerza la salida
