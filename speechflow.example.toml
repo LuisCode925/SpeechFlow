@@ -4,13 +4,15 @@
 
 [model]
 # name = "medium"
-# language = "es"
+# language = "es"        # "es", "en", otro idioma de Whisper, o "auto" (detecta entre es y en en cada dictado)
 # idle_timeout = 0.0     # segundos sin dictar antes de liberar el modelo de la GPU; 0 desactiva; mínimo 30.0
 # vad = true             # filtra silencios y ruido sin voz antes de transcribir; false desactiva
 
 [keys]
 # record = "ctrl_r"      # nombre de pynput.keyboard.Key (ctrl_r, f9, ...) o un carácter suelto
 # switch = "f8"          # tecla de cambio de entrada de audio; distinta de record
+# language = "f7"        # alterna es <-> en en caliente; distinta de record, switch y auto
+# auto = "f6"            # activa o desactiva la detección automática de idioma
 
 [audio]
 # device = "Realtek"     # índice (entero) o parte del nombre; sin definir: el que contenga "Realtek", si no el del sistema

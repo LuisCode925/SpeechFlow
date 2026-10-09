@@ -85,7 +85,8 @@ print(f"{seconds:.2f} s: {text}")
 
 - **Entrada:** `numpy.ndarray` `int16`, mono, a 16 kHz. El módulo no valida la tasa: un audio a otra tasa da transcripciones erróneas sin aviso.
 - **Salida:** `(texto, segundos)`. Los segundos no incluyen la carga del modelo ni el calentamiento. Un array vacío devuelve `("", 0.0)` sin invocar al modelo.
-- **Parámetros:** modelo (defecto `medium`), idioma (defecto `es`, fijo, sin detección automática) y `vad` (defecto `True`).
+- **Parámetros:** modelo (defecto `medium`), idioma por defecto (defecto `es`; `"auto"` detecta entre `es` y `en`) y `vad` (defecto `True`). `transcribe(audio, language=None)` acepta un idioma para esa llamada (`None` usa el del objeto; `"auto"` activa la detección) y deja el idioma realmente usado en `last_language`.
+- **Detección automática:** con `"auto"`, `WhisperModel.detect_language()` elige el de mayor probabilidad entre `es` y `en` (aunque otro idioma tenga la mayor) y transcribe con ese. Los segundos devueltos incluyen la detección. Si la detección falla (por ejemplo, audio sin voz), se usa el idioma fijo del objeto, o `es` si no es `es` ni `en`. El calentamiento llama también a `detect_language()` sobre un segundo de silencio.
 - **VAD:** con `vad=True`, cada transcripción usa `vad_filter` de `faster-whisper` (Silero, parámetros por defecto: se descartan silencios de 2 s o más, con 400 ms de margen), para que el silencio y el ruido sin voz no produzcan texto inventado. Una grabación sin voz devuelve texto vacío. El calentamiento hace una llamada extra con el filtro para cargar Silero al arrancar. `vad=False` lo desactiva.
 - **Liberación:** `close()` suelta la referencia al modelo y fuerza la recolección de basura para liberar la GPU. Es idempotente; no se debe llamar a `transcribe()` después.
 - `scripts/capture_mic.py` usa este módulo.
@@ -132,6 +133,7 @@ Powered by faster-whisper 1.2.1
 2026-10-05 14:32:07.412 INFO    Modelo cargado en 4.82 s (incluye calentamiento)
 2026-10-05 14:32:07.413 INFO    Dispositivo de audio: [9] Realtek Audio USB: Audio (hw:3,0) | 44100 Hz nativos a 16000 Hz mono
 2026-10-05 14:32:07.413 INFO    Cambio de entrada de audio: tecla 'f8'.
+2026-10-05 14:32:07.413 INFO    Cambio de idioma: tecla 'f7'; modo automático: tecla 'f6'.
 2026-10-05 14:32:07.413 INFO    Listo. Mantén pulsada la tecla 'ctrl_r' para dictar. Ctrl+C para salir.
 2026-10-05 14:32:15.208 INFO    Grabando...
 2026-10-05 14:32:26.391 INFO    Grabación terminada: 11.18 s. Transcribiendo con medium/es...
@@ -162,7 +164,7 @@ Opciones:
 | `--list-devices` | Lista los dispositivos de entrada y termina (`>` marca el del sistema). | — |
 | `--device` | Índice o nombre del dispositivo de entrada. Falla con un mensaje claro si no existe. | primero que contenga "Realtek"; si no, el del sistema |
 | `--model` | Modelo de `faster-whisper`. | `medium` |
-| `--language` | Idioma de la transcripción. | `es` |
+| `--language` | Idioma de la transcripción: `es`, `en`, otro idioma de Whisper, o `auto` (detecta entre `es` y `en` en cada dictado). | `es` |
 | `--key` | Tecla de disparo: nombre de `pynput.keyboard.Key` (`ctrl_r`, `f9`, ...) o un carácter suelto. Falla con un mensaje claro si no existe. | `ctrl_r` |
 | `--switch-key` | Tecla de cambio de entrada de audio, mismo formato que `--key`. Debe ser distinta de `--key`; si no, el script sale con código 1. | `f8` |
 | `--config` | Archivo de configuración TOML. Si no existe, el script sale con código 1. | `$XDG_CONFIG_HOME/speechflow/config.toml` (`~/.config/speechflow/config.toml`) |
@@ -178,9 +180,10 @@ Un argumento escrito en la línea de comandos gana sobre el archivo de configura
 - **Durante la transcripción:** pulsar la tecla no inicia otra grabación.
 - **Avisos:** todo se muestra por consola con prefijo de fecha, hora y nivel. Como notificación de escritorio solo salen el ciclo de vida del modelo en el arranque y la salida (`Cargando {modelo}...`, `Modelo {modelo} cargado`, `Modelo liberado`), los errores (micrófono, transcripción, inserción o recarga del modelo) el cambio de entrada de audio (`Entrada de audio: {nombre}`) y las alertas del micrófono (`Micrófono desconectado: {nombre}`, `Micrófono reconectado: {nombre}` y, al arrancar, `Micrófono guardado no disponible: {nombre}`). Dictar no genera notificaciones. Si falta `notify-send`, se avisa una vez y sigue funcionando solo con consola. Con `[notifications] enabled = false` no sale ninguna notificación y ese aviso tampoco.
 - **Cambio de entrada en caliente:** pulsar `--switch-key` (`f8`) pasa al siguiente dispositivo de entrada, en orden de índice y con vuelta al principio, sin recargar el modelo. Cada pulsación relee la lista de dispositivos, así que un micrófono conectado o desconectado con el script en marcha se tiene en cuenta. La rotación incluye todo lo que muestra `--list-devices` (también los `Loopback`; si el elegido no abre, el error sale al dictar y basta pulsar la tecla otra vez). Solo cambia en reposo: durante la grabación o la transcripción se registra un `WARNING` y no pasa nada. Con un único dispositivo se registra `Solo hay un dispositivo de entrada: ...` sin notificación. Un cambio efectivo guarda el nombre del dispositivo en `state.toml` (ver [Configuración](#configuración)), y al reiniciar se usa ese micrófono.
+- **Cambio de idioma en caliente:** la tecla `[keys] language` (`f7`) alterna `es` ↔ `en` sin recargar el modelo; un idioma distinto (por ejemplo `fr`) pasa a `es`. La tecla `[keys] auto` (`f6`) activa la detección automática (`language = "auto"`, restringida a `es`/`en`) y, pulsada otra vez, vuelve al último idioma fijo. Estando en auto, la tecla de idioma sale de auto y fija el otro idioma respecto al último fijo (último `es` → `en`, último `en` → `es`, otro → `es`); si se arranca en auto, el último fijo es `es`. Ambas teclas solo actúan en reposo: grabando o transcribiendo se registra un `WARNING` y no pasa nada. Mantener la tecla pulsada cambia una sola vez. Cada cambio registra `Idioma cambiado: ...`, envía una notificación y se guarda en `state.toml`; también funciona con el modelo descargado por inactividad (el modelo recargado usa el idioma vigente). En auto, los logs `Insertado (...)` y `Sin texto reconocido (...)` muestran `auto→es` o `auto→en`; la línea `Transcribiendo con ...` muestra `auto`, porque aún no se ha detectado. Las teclas solo se configuran en el TOML (no hay opciones de CLI).
 - **Vigilancia del micrófono:** un hilo comprueba cada `[audio] watch_interval` segundos (defecto 3, mínimo 1) que el micrófono seleccionado sigue conectado; lo identifica por nombre, porque los índices cambian al releer los dispositivos. En reposo relee los dispositivos (`refresh_devices()`) bajo el mismo bloqueo que las teclas, así que una pulsación puede esperar unos instantes. Al desconectarse registra un `WARNING` (`El micrófono seleccionado se desconectó: ...`) y envía una notificación, una sola vez. Mientras está desconectado, la tecla de grabar solo muestra un `WARNING` y no graba; reconectarlo o pulsar `--switch-key` lo resuelve. Al reconectarse registra `Micrófono reconectado: ...`, notifica y vuelve a usarlo sin pulsar nada. Si cae durante una grabación (no relee dispositivos en ese caso, solo comprueba que el stream siga activo), registra `...se desconectó durante la grabación: ...`, detiene la grabación y transcribe lo capturado si dura al menos `min_seconds`. PortAudio puede imprimir por stderr líneas `Expression 'alsa_snd_pcm_...' failed` en ese momento; no pasan por el log. No cambia solo de micrófono.
 - **Salida:** `Ctrl+C`, `SIGTERM` (`kill`, `systemctl stop`) y `SIGHUP` (cierre de la terminal) siguen la misma ruta. La consola muestra `Saliendo.` (con `SIGTERM` o `SIGHUP`, `Señal {nombre} recibida. Saliendo.`) y se ignoran las teclas de grabar y de cambio de entrada. Una grabación en curso se descarta sin transcribir (`Grabación descartada por cierre.`). Una transcripción en curso se espera hasta 30 s: su texto se inserta como siempre; si no termina en ese tiempo, se registra un `WARNING` y se sale sin liberar el modelo. También se espera a una recarga del modelo en curso. Después se libera el modelo con `Transcriber.close()` (suelta la GPU antes de terminar el proceso) y se notifica `Modelo liberado`; la consola muestra `Modelo {modelo} liberado.`. Si el modelo ya estaba descargado por inactividad, solo muestra el mensaje de salida. Una segunda señal durante la espera fuerza la salida inmediata (`Segunda señal recibida; salida inmediata.`). El código de salida es siempre 0. Las señales durante el arranque (validaciones y carga inicial del modelo) conservan el comportamiento anterior.
-- **Requisitos:** sesión X11 y `xdotool` instalado; si falta, el script sale al arrancar con código 1 y una línea `ERROR` indicando `sudo apt install xdotool`. Los errores de arranque (`--key`, `--switch-key` o `--device` inválidos, o `--switch-key` igual a `--key`) también terminan con código 1.
+- **Requisitos:** sesión X11 y `xdotool` instalado; si falta, el script sale al arrancar con código 1 y una línea `ERROR` indicando `sudo apt install xdotool`. Los errores de arranque (`--key`, `--switch-key` o `--device` inválidos, o dos de las teclas `--key`, `--switch-key`, `[keys] language` y `[keys] auto` iguales) también terminan con código 1.
 - **Foco:** el texto se escribe en la ventana que tenga el foco cuando termina la transcripción. Si cambias de ventana mientras se transcribe, se escribirá en la nueva.
 - **Una sola instancia:** no ejecutes dos a la vez; ambas reaccionarían a la misma tecla y competirían por el micrófono.
 
@@ -209,13 +212,15 @@ Las carpetas se crean al escribir la plantilla, el estado o el log. Un `speechfl
 ```toml
 [model]
 name = "medium"
-language = "es"
+language = "es"                # "es", "en", otro idioma de Whisper, o "auto" (detecta entre es y en en cada dictado)
 idle_timeout = 0.0          # segundos sin dictar antes de liberar el modelo de la GPU; 0 desactiva; mínimo 30.0
 vad = true                  # filtra silencios y ruido sin voz antes de transcribir; false desactiva
 
 [keys]
 record = "ctrl_r"
 switch = "f8"
+language = "f7"             # alterna es <-> en en caliente
+auto = "f6"                 # activa o desactiva la detección automática de idioma
 
 [audio]
 device = "Realtek"          # índice (entero) o parte del nombre; sin defecto
@@ -229,9 +234,9 @@ max_seconds = 60.0
 enabled = true
 ```
 
-**Precedencia por valor:** argumento de CLI (solo si se escribió) > micrófono guardado (solo el dispositivo) > archivo > defectos. En concreto, el dispositivo es `--device` > `state.toml` > `[audio] device` > el que contenga "Realtek", si no el del sistema.
+**Precedencia por valor:** argumento de CLI (solo si se escribió) > estado guardado (solo dispositivo e idioma) > archivo > defectos. En concreto, el dispositivo es `--device` > `state.toml` > `[audio] device` > el que contenga "Realtek", si no el del sistema, y el idioma es `--language` > `state.toml` > `[model] language` > `es`.
 
-**Validación:** una clave o sección desconocida, un tipo incorrecto, `min_seconds <= 0` o `max_seconds <= min_seconds` o `watch_interval < 1.0`, o un `idle_timeout` distinto de 0 y menor que 30.0 hacen inválido el archivo. Las teclas se siguen validando al arrancar con los mismos mensajes `ERROR` de `--key` y `--switch-key`.
+**Validación:** una clave o sección desconocida, un tipo incorrecto, `min_seconds <= 0` o `max_seconds <= min_seconds` o `watch_interval < 1.0`, o un `idle_timeout` distinto de 0 y menor que 30.0 hacen inválido el archivo. Las teclas se siguen validando al arrancar con mensajes `ERROR` que nombran la clave (`--key`, `--switch-key`, `[keys] language`, `[keys] auto`); si dos de las cuatro coinciden, el script sale con código 1 y nombra las dos.
 
 **Archivo de emergencia:** si no se encuentra ningún archivo, o el encontrado no se puede leer o no es válido, el script registra un `WARNING` con la causa, crea `config.emergency.toml` junto al archivo de configuración con todos los valores por defecto (sin sobrescribirlo si ya existe) y sigue con los defectos. El archivo inválido del usuario no se toca. La plantilla de emergencia no se lee nunca: cópiala o renómbrala a `config.toml` para usarla.
 
@@ -241,6 +246,15 @@ enabled = true
 ```
 
 **Micrófono guardado:** cada cambio efectivo con `--switch-key` escribe el **nombre** del dispositivo en `state.toml` (en `$XDG_STATE_HOME/speechflow/`; lo escribe el script, no se edita a mano). Al arrancar se usa ese micrófono salvo que se pase `--device`. Si ya no está disponible (por ejemplo, un USB desenchufado), se registra un `WARNING`, se envía la notificación `Micrófono guardado no disponible: {nombre}` y se usa el siguiente nivel de la precedencia. Ese micrófono no se vigila: el hilo vigila el que se haya elegido al arrancar.
+
+**Idioma guardado:** cada cambio con `[keys] language` o `[keys] auto` escribe `language` (`"es"`, `"en"`, `"auto"`, ...) en `state.toml`, junto a `device` sin pisarse:
+
+```toml
+device = "Realtek ALC1220"
+language = "auto"
+```
+
+Al arrancar se usa ese idioma salvo que se pase `--language`. **Ojo:** mientras exista `language` en `state.toml`, editar `[model] language` no tiene efecto; para volver al valor del TOML basta borrar esa línea de `state.toml`. Un `language` que no sea texto o esté vacío se ignora con un `WARNING`. El último idioma fijo (al que vuelve auto) no se guarda: arrancar en auto equivale a empezar con `es`.
 
 Estos archivos viven fuera del repo; en el repo solo se versiona `speechflow.example.toml`.
 
