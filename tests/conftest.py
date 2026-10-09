@@ -252,7 +252,7 @@ def crear_ptt(dobles, caplog):
     creados = []
     caplog.set_level("INFO", logger="speechflow")
 
-    def fabrica(transcriber="auto", device=None, min_seconds=0.1, max_seconds=5.0, idle_timeout=0.0, vad=True, language="es"):
+    def fabrica(transcriber="auto", device=None, min_seconds=0.1, max_seconds=5.0, idle_timeout=0.0, vad=True, language="es", mode="hold"):
         if transcriber == "auto":
             transcriber = TranscriberFalso()
         ptt = app.PushToTalk(
@@ -268,6 +268,7 @@ def crear_ptt(dobles, caplog):
             vad,
             keyboard.KeyCode.from_char("l"),
             keyboard.KeyCode.from_char("a"),
+            mode,
         )
         creados.append(ptt)
         return ptt

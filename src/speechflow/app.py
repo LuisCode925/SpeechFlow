@@ -124,9 +124,20 @@ class PushToTalk:
             return
         with self._lock:
             was_held, self._held = self._held, True
-            if was_held or self.state is not State.IDLE:
+            if was_held:
                 return
-            reloading = self._begin_recording()
+            if self.mode == "toggle" and self.state is State.RECORDING:
+                stopping = True
+            elif self.state is not State.IDLE:
+                if self.mode == "toggle":
+                    logger.warning("Se está transcribiendo el dictado anterior; espera a que termine para volver a grabar.")
+                return
+            else:
+                stopping = False
+                reloading = self._begin_recording()
+        if stopping:
+            self._stop_recording(False)
+            return
         if reloading is None:
             return
         logger.info("Grabando...")
@@ -175,7 +186,8 @@ class PushToTalk:
             return
         with self._lock:
             self._held = False
-        self._stop_recording(False)
+        if self.mode != "toggle":
+            self._stop_recording(False)
 
     def switch_device(self) -> None:
         """Pasa al siguiente dispositivo de entrada; solo en IDLE, nunca con un stream abierto."""
@@ -315,7 +327,8 @@ class PushToTalk:
                 return
             self.state = State.TRANSCRIBING
         if timed_out:
-            logger.warning(f"Límite de {self.max_seconds:g} s alcanzado; suelta la tecla y vuelve a pulsarla para otro dictado.")
+            again = "pulsa la tecla" if self.mode == "toggle" else "suelta la tecla y vuelve a pulsarla"
+            logger.warning(f"Límite de {self.max_seconds:g} s alcanzado; {again} para otro dictado.")
         logger.info(f"Grabación terminada: {seconds:.2f} s. Transcribiendo con {self.model_name}/{self.language}...")
         self._worker = threading.Thread(target=self._transcribe_and_insert, args=(audio,), daemon=True)
         self._worker.start()

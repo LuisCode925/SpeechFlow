@@ -303,6 +303,103 @@ class TestDictation:
         esperar_idle(ptt)
 
 
+class TestModoToggle:
+    def test_primera_pulsacion_graba_y_soltar_no_para(self, crear_ptt, caplog):
+        ptt = crear_ptt(mode="toggle")
+        ptt.on_press(R)
+        assert ptt.state is State.RECORDING and ptt.recorder.inicios == 1
+        ptt.on_release(R)
+        assert ptt.state is State.RECORDING and ptt.recorder.paradas == 0
+        assert "Grabando..." in mensajes(caplog)
+
+    def test_segunda_pulsacion_para_y_transcribe(self, crear_ptt, dobles, caplog):
+        ptt = crear_ptt(mode="toggle")
+        ptt.on_press(R)
+        ptt.on_release(R)
+        ptt.on_press(R)
+        ptt.on_release(R)
+        assert dobles.insertado.wait(2)
+        esperar_idle(ptt)
+        assert ptt.recorder.paradas == 1 and dobles.textos == ["hola mundo"]
+        assert "Grabación terminada: 1.00 s. Transcribiendo con medium/es..." in mensajes(caplog)
+
+    def test_repeticion_de_tecla_se_ignora(self, crear_ptt):
+        """Mantener la tecla pulsada es un solo cambio de estado."""
+        ptt = crear_ptt(mode="toggle")
+        ptt.on_press(R)
+        ptt.on_press(R)
+        ptt.on_press(R)
+        assert ptt.state is State.RECORDING and ptt.recorder.inicios == 1 and ptt.recorder.paradas == 0
+        ptt.on_release(R)
+        ptt.on_press(R)
+        ptt.on_press(R)
+        assert ptt.recorder.paradas == 1
+
+    def test_pulsar_transcribiendo_da_warning(self, crear_ptt, caplog):
+        transcriber = TranscriberFalso(bloquear=True)
+        ptt = crear_ptt(transcriber=transcriber, mode="toggle")
+        ptt.on_press(R)
+        ptt.on_release(R)
+        ptt.on_press(R)
+        ptt.on_release(R)
+        assert transcriber.entro.wait(2)
+        ptt.on_press(R)
+        assert ptt.state is State.TRANSCRIBING and ptt.recorder.inicios == 1
+        assert any("transcribiendo" in m for m in mensajes(caplog, "WARNING"))
+        ptt.on_release(R)
+        transcriber.liberar.set()
+        esperar_idle(ptt)
+
+    def test_grabacion_corta_se_descarta(self, crear_ptt, dobles, caplog):
+        transcriber = TranscriberFalso()
+        ptt = crear_ptt(transcriber=transcriber, mode="toggle")
+        ptt.recorder.segundos = 0.05
+        ptt.on_press(R)
+        ptt.on_release(R)
+        ptt.on_press(R)
+        ptt.on_release(R)
+        assert ptt.state is State.IDLE
+        assert "Grabación de 0.05 s descartada (mínimo 0.1 s)." in mensajes(caplog)
+        assert transcriber.llamadas == 0 and dobles.textos == []
+
+    def test_corte_por_max_seconds_y_pulsacion_posterior(self, crear_ptt, dobles, caplog):
+        """Tras el corte automático, la pulsación siguiente empieza un dictado nuevo sin romper el estado."""
+        ptt = crear_ptt(max_seconds=0.05, mode="toggle")
+        ptt.on_press(R)
+        ptt.on_release(R)
+        assert dobles.insertado.wait(2)
+        assert "Límite de 0.05 s alcanzado; pulsa la tecla para otro dictado." in mensajes(caplog, "WARNING")
+        esperar_idle(ptt)
+        assert ptt.recorder.paradas == 1
+        ptt.on_press(R)
+        assert ptt.state is State.RECORDING and ptt.recorder.inicios == 2
+        ptt.on_release(R)
+
+    def test_microfono_desconectado_no_graba(self, crear_ptt, caplog):
+        ptt = crear_ptt(device="USB Mic", mode="toggle")
+        ptt._device_missing = True
+        ptt.on_press(R)
+        assert ptt.state is State.IDLE and ptt.recorder.inicios == 0
+        assert any("no está conectado" in m for m in mensajes(caplog, "WARNING"))
+
+    @pytest.mark.parametrize("tecla", [F, L, A])
+    def test_teclas_de_cambio_rechazadas_grabando(self, crear_ptt, caplog, tecla):
+        ptt = crear_ptt(mode="toggle")
+        ptt.on_press(R)
+        ptt.on_release(R)
+        ptt.on_press(tecla)
+        assert ptt.state is State.RECORDING
+        assert mensajes(caplog, "WARNING")
+
+    def test_hold_sin_cambios(self, crear_ptt, dobles):
+        ptt = crear_ptt(mode="hold")
+        ptt.on_press(R)
+        ptt.on_release(R)
+        assert ptt.recorder.paradas == 1
+        assert dobles.insertado.wait(2)
+        esperar_idle(ptt)
+
+
 DESCRIPCION_REALTEK = "[1] Realtek ALC | 48000 Hz nativos a 16000 Hz mono"
 DESCRIPCION_USB = "[2] USB Mic | 48000 Hz nativos a 16000 Hz mono"
 
