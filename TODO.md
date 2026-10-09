@@ -29,7 +29,7 @@ Valor medio:
 
 - [ ] 5. Inserción por portapapeles (Ctrl+V), más robusta que `xdotool type` con acentos y caracteres raros; restaurar el portapapeles después.
 - [ ] 6. Diccionario de reemplazos del usuario (`[replacements]` en TOML) e `initial_prompt` configurable para sesgar el vocabulario.
-- [ ] 7. Comandos de voz de puntuación ("punto", "coma", "nueva línea").
+- [x] ~~7. Comandos de voz de puntuación ("punto", "coma", "nueva línea").~~ (SPEC 21, `[text] punctuation_commands`)
 - [ ] 8. Historial de transcripciones (JSONL en `state_dir()`); la GUI lo necesitará y permite recuperar un dictado perdido.
 
 Base para la GUI:

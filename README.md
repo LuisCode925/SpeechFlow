@@ -94,6 +94,7 @@ print(f"{seconds:.2f} s: {text}")
 ## Módulos de captura, inserción, notificación y log
 
 - `src/speechflow/audio.py`: dispositivos de entrada, remuestreo, medición, guardado de WAV y `Recorder` (`start()` / `stop()`), que graba a la tasa nativa del dispositivo y devuelve `int16` mono a 16 kHz. Para el cambio de entrada en caliente expone `input_devices()` (índices con entrada), `refresh_devices()` (reinicializa PortAudio para ver micrófonos conectados o desconectados; solo sin streams abiertos), `device_index()` (índice real de un dispositivo, o `None`) y `next_input_device()` (el siguiente, con vuelta al principio). Para vigilar el micrófono seleccionado expone `device_name()` (nombre de un dispositivo, o `None`), `input_device_by_name()` (índice del primer dispositivo de entrada con ese nombre exacto, o `None`) y `Recorder.active` (hay un stream abierto y activo); `Recorder.stop()` tolera un stream caído. Lo usan `capture_mic.py` y `app.py`.
+- `src/speechflow/punctuation.py`: `apply_voice_punctuation(text, language)`, función pura que sustituye los comandos de voz de puntuación (ver [Comandos de voz de puntuación](#comandos-de-voz-de-puntuación)); `app.py` la aplica entre la transcripción y `insert_text()`.
 - `src/speechflow/inserter.py`: `insert_text(text)` escribe el texto en la ventana con foco con `xdotool type --clearmodifiers`.
 - `src/speechflow/notifier.py`: `notify(title, body)` envía una notificación de escritorio con `notify-send`; si no está instalado o están desactivadas con `set_enabled(False)`, no hace nada.
 - `src/speechflow/config.py`: configuración de usuario de la app de push-to-talk (`Config`, `find_config()`, `load_config()`, `write_emergency()` y el estado del micrófono con `load_state_device()` / `save_state_device()`). Ver [Configuración](#configuración).
@@ -188,6 +189,42 @@ Un argumento escrito en la línea de comandos gana sobre el archivo de configura
 - **Foco:** el texto se escribe en la ventana que tenga el foco cuando termina la transcripción. Si cambias de ventana mientras se transcribe, se escribirá en la nueva.
 - **Una sola instancia:** no ejecutes dos a la vez; ambas reaccionarían a la misma tecla y competirían por el micrófono.
 
+## Comandos de voz de puntuación
+
+Con `[text] punctuation_commands = true` (el defecto), el texto transcrito pasa por `apply_voice_punctuation()` antes de insertarse: las palabras dictadas de la tabla se sustituyen por su signo. El vocabulario depende del idioma usado en el dictado (en modo `auto`, el detectado); con cualquier otro idioma (por ejemplo `fr`) el texto se inserta tal cual.
+
+| Resultado | Español | Inglés |
+| --------- | ------- | ------ |
+| `.` | `punto` | `period` |
+| `,` | `coma` | `comma` |
+| `;` | `punto y coma` | `semicolon` |
+| `:` | `dos puntos` | `colon` |
+| `?` | `interrogación`, `cerrar interrogación` | `question mark` |
+| `¿` | `abrir interrogación` | — |
+| `!` | `exclamación`, `cerrar exclamación` | `exclamation mark` |
+| `¡` | `abrir exclamación` | — |
+| `...` | `puntos suspensivos` | `ellipsis` |
+| salto de línea | `nueva línea` | `new line` |
+| párrafo (dos saltos) | `nuevo párrafo` | `new paragraph` |
+| `(` / `)` | `abrir paréntesis` / `cerrar paréntesis` | `open parenthesis` / `close parenthesis` |
+| `"` (apertura / cierre) | `abrir comillas` / `cerrar comillas` | `open quote` / `close quote` |
+| `-` (con un espacio a cada lado) | `guion` | `dash` |
+
+Ejemplo: dictar "hola coma mundo punto" inserta `Hola, mundo.`.
+
+- **Coincidencia:** no distingue mayúsculas ni la puntuación que Whisper pega a las palabras del comando (`Punto.` y `coma,` valen como `punto` y `coma`). Gana la frase más larga: `punto y coma` antes que `punto`, y `dos puntos` antes que `puntos suspensivos`. Si el comando es `. , ; : ? ! ...`, también se quita la puntuación final de la palabra anterior (`Hola, coma` no da `Hola,,`).
+- **Espaciado:** sin espacio antes de `. , ; : ? ! ...`, `)` ni la comilla de cierre; sin espacio después de `¿ ¡ (` ni la comilla de apertura.
+- **Mayúsculas:** la primera letra del texto y la que sigue a `.`, `?`, `!` y a los saltos de línea se ponen en mayúscula (atravesando `¿ ¡ ( "`). **Con la función activa, la primera letra de cada dictado sale en mayúscula aunque no uses ningún comando**, también si continúas una frase ya empezada en la ventana de destino. No se capitaliza tras `...` ni los nombres propios.
+- **Palabra de escape:** `literal` (en inglés, `literally`) justo delante de un comando lo deja como palabra normal y se descarta; solo afecta a una palabra. "Un literal punto de vista" inserta `Un punto de vista`. Si no precede a un comando, `literal` se conserva. No hay forma de escribir `literal` seguido de un comando.
+- **`nueva línea` y `nuevo párrafo` teclean `Return`** (`xdotool type`). En un chat o formulario, `Return` puede enviar el mensaje; si te pasa, apaga la función.
+- **Palabras ambiguas:** `punto`, `coma`, `guion` o `comillas` en una frase normal también se sustituyen. Usa `literal` o apaga la función. Cuando el texto cambia, el log muestra `Texto original: ...` justo antes de `Insertado (...)`, para ver qué se sustituyó.
+- **Apagarla:** `[text] punctuation_commands = false` inserta exactamente lo que devuelve Whisper, sin mayúscula inicial. Se lee solo al arrancar; cambiarla exige reiniciar. No hay opción de CLI ni tecla en caliente.
+
+```
+2026-10-09 10:15:03.221 INFO    Texto original: hola coma mundo punto
+2026-10-09 10:15:03.222 INFO    Insertado (0.42 s, 0.12x tiempo real, 12 caracteres, medium/es): Hola, mundo.
+```
+
 ## Configuración
 
 La app de push-to-talk lee un archivo TOML opcional (solo ella; `capture_mic.py`, `benchmark_stt.py` y `--list-devices` no lo usan). Se usa el primero que exista, sin fusionar:
@@ -234,11 +271,14 @@ mode = "hold"               # "hold": graba mientras mantienes la tecla; "toggle
 
 [notifications]
 enabled = true
+
+[text]
+punctuation_commands = true # sustituye "punto", "coma", "nueva línea"... por su signo; false inserta lo que transcribe Whisper
 ```
 
 **Precedencia por valor:** argumento de CLI (solo si se escribió) > estado guardado (solo dispositivo e idioma) > archivo > defectos. En concreto, el dispositivo es `--device` > `state.toml` > `[audio] device` > el que contenga "Realtek", si no el del sistema, y el idioma es `--language` > `state.toml` > `[model] language` > `es`.
 
-**Validación:** una clave o sección desconocida, un tipo incorrecto, `min_seconds <= 0` o `max_seconds <= min_seconds` o `watch_interval < 1.0`, un `idle_timeout` distinto de 0 y menor que 30.0, o un `mode` que no sea `"hold"` ni `"toggle"` hacen inválido el archivo. Las teclas se siguen validando al arrancar con mensajes `ERROR` que nombran la clave (`--key`, `--switch-key`, `[keys] language`, `[keys] auto`); si dos de las cuatro coinciden, el script sale con código 1 y nombra las dos.
+**Validación:** una clave o sección desconocida, un tipo incorrecto, `min_seconds <= 0` o `max_seconds <= min_seconds` o `watch_interval < 1.0`, un `idle_timeout` distinto de 0 y menor que 30.0, un `mode` que no sea `"hold"` ni `"toggle"`, o un `punctuation_commands` que no sea `true` ni `false` (por ejemplo `"si"`) hacen inválido el archivo. Las teclas se siguen validando al arrancar con mensajes `ERROR` que nombran la clave (`--key`, `--switch-key`, `[keys] language`, `[keys] auto`); si dos de las cuatro coinciden, el script sale con código 1 y nombra las dos.
 
 **Archivo de emergencia:** si no se encuentra ningún archivo, o el encontrado no se puede leer o no es válido, el script registra un `WARNING` con la causa, crea `config.emergency.toml` junto al archivo de configuración con todos los valores por defecto (sin sobrescribirlo si ya existe) y sigue con los defectos. El archivo inválido del usuario no se toca. La plantilla de emergencia no se lee nunca: cópiala o renómbrala a `config.toml` para usarla.
 

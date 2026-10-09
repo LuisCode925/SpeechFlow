@@ -1,6 +1,6 @@
 # SPEC 21 — Comandos de voz de puntuación
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 04, SPEC 10, SPEC 16, SPEC 19
 > **Fecha:** 2026-10-09
 > **Objetivo:** Añadir la clave `[text] punctuation_commands` (activada por defecto) y un módulo `punctuation.py` que sustituye, tras transcribir y antes de insertar, palabras dictadas como "punto", "coma" o "nueva línea" (y sus equivalentes en inglés) por el signo o salto correspondiente.

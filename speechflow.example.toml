@@ -25,3 +25,6 @@
 
 [notifications]
 # enabled = true         # false desactiva todas las notificaciones de escritorio
+
+[text]
+# punctuation_commands = true   # sustituye "punto", "coma", "nueva línea"... por su signo (es/en) y pone mayúscula inicial; false inserta lo que transcribe Whisper
