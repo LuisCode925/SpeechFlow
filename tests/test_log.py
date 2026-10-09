@@ -1,10 +1,13 @@
 """Tests de speechflow.log."""
 import logging
+import os
 import re
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 import pytest
 
-from speechflow import __version__, log
+from speechflow import __version__, config, log
 from speechflow.log import log_banner, setup_logging
 
 
@@ -15,6 +18,8 @@ def logger_limpio():
     antes = (list(logger.handlers), logger.level, logger.propagate)
     logger.handlers.clear()
     yield logger
+    for handler in logger.handlers:
+        handler.close()
     logger.handlers[:] = antes[0]
     logger.setLevel(antes[1])
     logger.propagate = antes[2]
@@ -27,7 +32,8 @@ def test_devuelve_el_logger_speechflow():
 def test_no_duplica_manejadores():
     logger = setup_logging()
     setup_logging()
-    assert len(logger.handlers) == 2
+    assert len(logger.handlers) == 3
+    assert sum(isinstance(h, RotatingFileHandler) for h in logger.handlers) == 1
 
 
 def test_info_va_a_stdout(capsys):
@@ -62,6 +68,101 @@ def test_formato_warning_alinea_nivel(capsys):
 
 def test_no_propaga_al_root():
     assert setup_logging().propagate is False
+
+
+def modo(ruta):
+    return ruta.stat().st_mode & 0o777
+
+
+class TestArchivo:
+    def test_recibe_info_warning_y_error_sin_debug(self, capsys):
+        logger = setup_logging()
+        logger.debug("ruido")
+        logger.info("uno")
+        logger.warning("dos")
+        logger.error("tres")
+        lineas = config.log_path().read_text(encoding="utf-8").splitlines()
+        assert [l.split(None, 3)[2:] for l in lineas] == [["INFO", "uno"], ["WARNING", "dos"], ["ERROR", "tres"]]
+
+    def test_mismo_formato_que_la_consola(self, capsys):
+        setup_logging().warning("mensaje")
+        consola = capsys.readouterr().err
+        assert config.log_path().read_text(encoding="utf-8") == consola
+
+    def test_no_recibe_el_banner(self, capsys):
+        setup_logging()
+        log_banner()
+        assert config.log_path().read_text(encoding="utf-8") == ""
+
+    def test_codificacion_utf8(self):
+        setup_logging().info("Insertado (1.0 s): ñandú ✓")
+        assert "ñandú ✓" in config.log_path().read_bytes().decode("utf-8")
+
+    def test_crea_la_carpeta_con_modo_0600(self):
+        assert not config.state_dir().exists()
+        setup_logging()
+        assert modo(config.log_path()) == 0o600
+
+    def test_dos_llamadas_dejan_un_manejador_de_archivo(self):
+        logger = setup_logging()
+        setup_logging()
+        assert sum(isinstance(h, RotatingFileHandler) for h in logger.handlers) == 1
+
+    def test_rota_y_conserva_permisos_0600(self, monkeypatch):
+        monkeypatch.setattr(log, "LOG_MAX_BYTES", 200)
+        monkeypatch.setattr(log, "LOG_BACKUP_COUNT", 3)
+        logger = setup_logging()
+        for i in range(60):
+            logger.info("linea %02d %s", i, "x" * 20)
+        base = config.log_path()
+        nombres = sorted(p.name for p in base.parent.iterdir())
+        assert nombres == ["speechflow.log", "speechflow.log.1", "speechflow.log.2", "speechflow.log.3"]
+        assert all(modo(p) == 0o600 for p in base.parent.iterdir())
+
+    def test_umask_restrictiva_no_afloja_el_modo(self):
+        anterior = os.umask(0o077)
+        try:
+            setup_logging()
+        finally:
+            os.umask(anterior)
+        assert modo(config.log_path()) == 0o600
+
+    def test_import_no_crea_archivos(self, tmp_path):
+        import importlib
+
+        importlib.reload(log)
+        assert not (tmp_path / "xdg-state").exists()
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root ignora los permisos")
+    def test_carpeta_no_escribible_avisa_y_sigue(self, tmp_path, capsys):
+        estado = tmp_path / "xdg-state"
+        estado.mkdir()
+        estado.chmod(0o500)
+        try:
+            logger = setup_logging()
+            logger.info("sigue")
+        finally:
+            estado.chmod(0o700)
+        captura = capsys.readouterr()
+        assert "No se puede escribir el log en" in captura.err
+        assert "Solo habrá log por consola." in captura.err
+        assert "sigue" in captura.out
+        assert not any(isinstance(h, RotatingFileHandler) for h in logger.handlers)
+
+    def test_sin_home_avisa_y_sigue(self, monkeypatch, capsys):
+        monkeypatch.delenv("XDG_STATE_HOME")
+        monkeypatch.delenv("HOME")
+
+        def sin_home(self):
+            raise RuntimeError("sin home")
+
+        monkeypatch.setattr(Path, "expanduser", sin_home)
+        logger = setup_logging()
+        logger.info("sigue")
+        captura = capsys.readouterr()
+        assert "No se puede escribir el log en" in captura.err
+        assert "sigue" in captura.out
+        assert len(logger.handlers) == 2
 
 
 class TestBanner:
