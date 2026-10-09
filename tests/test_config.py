@@ -41,6 +41,20 @@ class TestRutasXdg:
         monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "s"))
         assert config.state_path() == tmp_path / "s" / "speechflow" / "state.toml"
 
+    def test_log_path_variable_absoluta(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "s"))
+        assert config.log_path() == tmp_path / "s" / "speechflow" / "speechflow.log"
+
+    @pytest.mark.parametrize("valor", [None, "", "relativa/dir"])
+    def test_log_path_variable_ausente_vacia_o_relativa(self, monkeypatch, valor):
+        """Ausente, vacía o relativa: se usa ~/.local/state/speechflow."""
+        if valor is None:
+            monkeypatch.delenv("XDG_STATE_HOME")
+        else:
+            monkeypatch.setenv("XDG_STATE_HOME", valor)
+        esperado = Path.home() / ".local" / "state" / "speechflow" / "speechflow.log"
+        assert config.log_path() == esperado
+
     def test_sin_home_lanza_runtimeerror(self, monkeypatch):
         """Sin HOME ni variable XDG, expanduser falla con RuntimeError."""
         monkeypatch.delenv("XDG_CONFIG_HOME")

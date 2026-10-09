@@ -71,6 +71,10 @@ def state_path() -> Path:
     return state_dir() / "state.toml"
 
 
+def log_path() -> Path:
+    return state_dir() / "speechflow.log"
+
+
 def find_config(explicit: Path | None) -> Path | None:
     """Devuelve --config o el archivo de usuario si existen, o None si no hay ninguno."""
     if explicit is not None:
