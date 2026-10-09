@@ -51,19 +51,19 @@ class TestLoadTranscriber:
         creados = []
 
         class TranscriberFalso:
-            def __init__(self, model, language):
-                creados.append((model, language))
+            def __init__(self, model, language, vad):
+                creados.append((model, language, vad))
 
         monkeypatch.setattr(app, "Transcriber", TranscriberFalso)
         with caplog.at_level("INFO", logger="speechflow"):
-            resultado = app.load_transcriber("small", "en")
-        assert isinstance(resultado, TranscriberFalso) and creados == [("small", "en")]
+            resultado = app.load_transcriber("small", "en", False)
+        assert isinstance(resultado, TranscriberFalso) and creados == [("small", "en", False)]
         mensajes = [r.getMessage() for r in caplog.records]
         assert mensajes[0] == "Cargando small (int8, GPU)..."
         assert mensajes[1].startswith("Modelo cargado en ") and mensajes[1].endswith(" s (incluye calentamiento)")
 
     def test_no_notifica(self, monkeypatch, subprocess_falso):
-        monkeypatch.setattr(app, "Transcriber", lambda model, language: object())
+        monkeypatch.setattr(app, "Transcriber", lambda model, language, vad: object())
         app.load_transcriber("small", "en")
         assert subprocess_falso == []
 

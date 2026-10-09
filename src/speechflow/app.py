@@ -63,6 +63,7 @@ class PushToTalk:
         min_seconds: float,
         max_seconds: float,
         idle_timeout: float,
+        vad: bool = True,
     ) -> None:
         self.key = key
         self.switch_key = switch_key
@@ -73,6 +74,7 @@ class PushToTalk:
         self.recorder = Recorder(device)
         self.transcriber = transcriber  # None = modelo descargado
         self.idle_timeout = idle_timeout  # 0 = no se libera nunca
+        self.vad = vad  # para recargar el modelo con el mismo ajuste
         self._idle_timer: threading.Timer | None = None
         self._loader: threading.Thread | None = None  # hilo de recarga en curso
         self._worker: threading.Thread | None = None  # hilo de transcripción en curso
@@ -253,7 +255,7 @@ class PushToTalk:
     def _load_model(self) -> None:
         """Cuerpo del hilo de recarga: carga el modelo fuera del lock y lo publica, o guarda el error."""
         try:
-            transcriber = load_transcriber(self.model_name, self.language)
+            transcriber = load_transcriber(self.model_name, self.language, self.vad)
         except Exception as error:
             with self._lock:
                 self._load_error = error
@@ -383,11 +385,11 @@ def describe_device(device: int | str | None) -> str:
     return f"[{index}] {info['name']} | {int(info['default_samplerate'])} Hz nativos a {SAMPLE_RATE} Hz mono"
 
 
-def load_transcriber(model: str, language: str) -> Transcriber:
+def load_transcriber(model: str, language: str, vad: bool = True) -> Transcriber:
     """Carga el modelo registrando `Cargando ...` y `Modelo cargado en ...`; no notifica."""
     logger.info(f"Cargando {model} ({COMPUTE_TYPE}, GPU)...")
     started = time.perf_counter()
-    transcriber = Transcriber(model, language)
+    transcriber = Transcriber(model, language, vad)
     logger.info(f"Modelo cargado en {time.perf_counter() - started:.2f} s (incluye calentamiento)")
     return transcriber
 
@@ -499,14 +501,14 @@ def main() -> None:
         sys.exit(1)
 
     notify("SpeechFlow", f"Cargando {model}...")
-    transcriber = load_transcriber(model, language)
+    transcriber = load_transcriber(model, language, config.vad)
     notify("SpeechFlow", f"Modelo {model} cargado")
-    logger.info(f"Modelo: {model} | idioma: {language} | compute_type: {COMPUTE_TYPE} | GPU")
+    logger.info(f"Modelo: {model} | idioma: {language} | compute_type: {COMPUTE_TYPE} | GPU | VAD: {'sí' if config.vad else 'no'}")
     logger.info(f"Dispositivo de audio: {describe_device(device)}")
     logger.info(f"Cambio de entrada de audio: tecla {switch_key_name!r}.")
     logger.info(f"Listo. Mantén pulsada la tecla {key_name!r} para dictar. Ctrl+C para salir.")
 
-    push_to_talk = PushToTalk(key, switch_key, device, transcriber, model, language, config.min_seconds, config.max_seconds, config.idle_timeout)
+    push_to_talk = PushToTalk(key, switch_key, device, transcriber, model, language, config.min_seconds, config.max_seconds, config.idle_timeout, config.vad)
     push_to_talk.start_watcher(config.watch_interval)
     listener = keyboard.Listener(on_press=push_to_talk.on_press, on_release=push_to_talk.on_release)
     closing = threading.Event()  # la primera señal lo marca; una segunda fuerza la salida

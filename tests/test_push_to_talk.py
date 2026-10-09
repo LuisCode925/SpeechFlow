@@ -325,8 +325,8 @@ def carga(monkeypatch):
     """Sustituye load_transcriber: bloquea en `puerta` y devuelve un TranscriberFalso o lanza `error`."""
     estado = SimpleNamespace(puerta=threading.Event(), llamadas=[], error=None, creados=[])
 
-    def cargar(model, language):
-        estado.llamadas.append((model, language))
+    def cargar(model, language, vad):
+        estado.llamadas.append((model, language, vad))
         estado.puerta.wait(2)
         if estado.error is not None:
             raise estado.error
@@ -398,9 +398,18 @@ class TestIdleAndReload:
         assert dobles.textos == []  # la carga sigue bloqueada
         carga.puerta.set()
         assert dobles.insertado.wait(2)
-        assert dobles.textos == ["hola mundo"] and carga.llamadas == [("medium", "es")]
+        assert dobles.textos == ["hola mundo"] and carga.llamadas == [("medium", "es", True)]
         esperar_idle(ptt)
         assert ptt.transcriber is carga.creados[0]
+
+    def test_recarga_conserva_el_ajuste_vad(self, crear_ptt, carga, dobles):
+        carga.puerta.set()
+        ptt = crear_ptt(transcriber=None, vad=False)
+        ptt.on_press(R)
+        ptt.on_release(R)
+        assert dobles.insertado.wait(2)
+        assert carga.llamadas == [("medium", "es", False)]
+        esperar_idle(ptt)
 
     def test_fallo_de_recarga_descarta_el_audio(self, crear_ptt, carga, dobles, caplog):
         carga.error = RuntimeError("sin VRAM")
