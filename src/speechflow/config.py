@@ -23,6 +23,7 @@ class Config:
     watch_interval: float = 3.0
     notifications: bool = True
     idle_timeout: float = 0.0  # [model] idle_timeout, en segundos; 0 = desactivado
+    vad: bool = True  # [model] vad; filtra silencios con Silero antes de transcribir
 
 
 class ConfigError(Exception):
@@ -35,6 +36,7 @@ _SCHEMA: dict[str, dict[str, tuple[tuple[type, ...], str]]] = {
         "name": ((str,), "model"),
         "language": ((str,), "language"),
         "idle_timeout": ((int, float), "idle_timeout"),
+        "vad": ((bool,), "vad"),
     },
     "keys": {"record": ((str,), "key"), "switch": ((str,), "switch_key")},
     "audio": {"device": ((int, str), "device"), "watch_interval": ((int, float), "watch_interval")},
@@ -135,6 +137,7 @@ def _emergency_template() -> str:
         f"name = {json.dumps(d.model)}\n"
         f"language = {json.dumps(d.language)}\n"
         f"idle_timeout = {d.idle_timeout}  # segundos sin dictar antes de liberar el modelo; 0 desactiva; mínimo 30.0\n"
+        f"vad = {str(d.vad).lower()}  # filtra silencios y ruido sin voz antes de transcribir; false desactiva\n"
         "\n"
         "[keys]\n"
         f"record = {json.dumps(d.key)}\n"

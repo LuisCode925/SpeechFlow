@@ -96,14 +96,14 @@ class TestLoadConfig:
     def test_valido_completo(self, tmp_path):
         ruta = escribir(
             tmp_path,
-            '[model]\nname = "small"\nlanguage = "en"\nidle_timeout = 60\n'
+            '[model]\nname = "small"\nlanguage = "en"\nidle_timeout = 60\nvad = false\n'
             '[keys]\nrecord = "f9"\nswitch = "f10"\n'
             '[audio]\ndevice = "Realtek"\nwatch_interval = 2\n'
             "[recording]\nmin_seconds = 1\nmax_seconds = 10\n"
             "[notifications]\nenabled = false\n",
         )
         c = config.load_config(ruta)
-        assert c == Config("small", "en", "f9", "f10", "Realtek", 1.0, 10.0, 2.0, False, 60.0)
+        assert c == Config("small", "en", "f9", "f10", "Realtek", 1.0, 10.0, 2.0, False, 60.0, False)
         assert isinstance(c.min_seconds, float)
 
     def test_device_entero(self, tmp_path):
@@ -148,6 +148,17 @@ class TestLoadConfig:
     def test_int_no_vale_como_bool(self, tmp_path):
         with pytest.raises(ConfigError, match="notifications.enabled debe ser bool, no int"):
             config.load_config(escribir(tmp_path, "[notifications]\nenabled = 1\n"))
+
+    def test_vad_defecto_true(self, tmp_path):
+        assert config.load_config(escribir(tmp_path, "")).vad is True
+
+    def test_vad_false(self, tmp_path):
+        assert config.load_config(escribir(tmp_path, "[model]\nvad = false\n")).vad is False
+
+    @pytest.mark.parametrize("valor", ["1", '"si"'])
+    def test_vad_tipo_invalido(self, tmp_path, valor):
+        with pytest.raises(ConfigError, match="model.vad debe ser bool"):
+            config.load_config(escribir(tmp_path, f"[model]\nvad = {valor}\n"))
 
     @pytest.mark.parametrize(
         "texto, mensaje",
