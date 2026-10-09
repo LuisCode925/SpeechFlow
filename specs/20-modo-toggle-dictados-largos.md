@@ -1,6 +1,6 @@
 # SPEC 20 — Modo toggle para dictados largos
 
-> **Estado:** Aprobado.
+> **Estado:** Implementado
 > **Depende de:** SPEC 05, SPEC 10, SPEC 12, SPEC 16, SPEC 19
 > **Fecha:** 2026-10-09
 > **Objetivo:** Añadir la clave `[recording] mode` (`"hold"` por defecto, o `"toggle"`) para que, en modo toggle, la tecla `record` empiece la grabación con una pulsación y la pare con la siguiente, permitiendo dictados largos sin mantener la tecla.
