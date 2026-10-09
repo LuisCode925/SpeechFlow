@@ -20,7 +20,8 @@
 
 [recording]
 # min_seconds = 0.5      # por debajo no se transcribe ni se escribe nada
-# max_seconds = 60.0     # la grabación se corta sola; debe ser mayor que min_seconds
+# max_seconds = 60.0     # la grabación se corta sola; debe ser mayor que min_seconds (súbelo para dictados largos en toggle)
+# mode = "hold"          # "hold": graba mientras mantienes la tecla; "toggle": una pulsación empieza y otra para
 
 [notifications]
 # enabled = true         # false desactiva todas las notificaciones de escritorio

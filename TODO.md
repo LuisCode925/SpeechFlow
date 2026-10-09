@@ -23,7 +23,7 @@ Alto valor, esfuerzo bajo:
 - [x] ~~1. VAD (`vad_filter` de `faster-whisper`, Silero) y recorte de silencios: menos alucinaciones en silencio y transcripción más rápida.~~ (SPEC 18, `[model] vad`)
 - [x] ~~2. Cambio de idioma en caliente (es/en) con tecla nueva en `[keys]`, y detección automática de idioma como modo opcional.~~ (SPEC 19, `[keys] language` y `[keys] auto`)
 - [ ] 3. Opciones `--quiet` / `--verbose` y niveles de log configurables.
-- [ ] 4. Modo toggle (pulsar para empezar, pulsar para parar), para dictados largos.
+- [x] ~~4. Modo toggle (pulsar para empezar, pulsar para parar), para dictados largos.~~ (SPEC 20, `[recording] mode`)
 
 Valor medio:
 
@@ -62,7 +62,8 @@ Pueden esperar: soporte Wayland y reducción de ruido.
 
 ## Entrada y salida de texto
 
-- [ ] Modo toggle y combinaciones de varias teclas (SPEC 05).
+- [x] ~~Modo toggle~~ (SPEC 20, `[recording] mode`).
+- [ ] Combinaciones de varias teclas (SPEC 05).
 - [ ] Soporte Wayland, `ydotool` e inserción por portapapeles (SPEC 01, 05).
 
 ## Ejecución en segundo plano

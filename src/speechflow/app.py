@@ -9,6 +9,9 @@ Un hilo vigilante avisa por log y notificación cuando el micrófono seleccionad
 reconecta (`[audio] watch_interval`, 3 s por defecto); no cambia de micrófono por su cuenta.
 Con `[model] idle_timeout` distinto de 0 (mínimo 30 s) libera el modelo de la GPU tras ese tiempo
 en reposo; al pulsar la tecla graba al instante y recarga el modelo en paralelo.
+Con `[recording] mode = "toggle"` (defecto `"hold"`) no hace falta mantener la tecla: una pulsación
+empieza a grabar y la siguiente para y transcribe; pulsar mientras se transcribe solo avisa. Se
+aplica `max_seconds` igual (súbelo para dictados largos) y el modo se lee solo al arrancar.
 
 Las opciones (modelo, idioma, teclas, dispositivo, límites de grabación y notificaciones) se pueden
 fijar en un archivo TOML: `--config RUTA`, si no `$XDG_CONFIG_HOME/speechflow/config.toml` (defecto
