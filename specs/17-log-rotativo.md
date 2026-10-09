@@ -1,6 +1,6 @@
 # SPEC 17 — Log rotativo en archivo
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 07, SPEC 09, SPEC 14, SPEC 15, SPEC 16
 > **Fecha:** 2026-10-09
 > **Objetivo:** Escribir las mismas líneas `INFO`, `WARNING` y `ERROR` de la consola en `$XDG_STATE_HOME/speechflow/speechflow.log` con rotación por tamaño (1 MB y 3 copias), sin que un fallo del archivo impida arrancar.

@@ -10,8 +10,9 @@ Orden y dependencias: 13 → 14 → 15 → 16.
 - [x] ~~SPEC 14: `pyproject.toml`, comando `speechflow`, `python -m speechflow` y rutas de configuración/estado independientes del repo.~~
 - [x] ~~SPEC 15: cierre limpio ante `SIGTERM`/`SIGHUP` y espera a la transcripción en curso.~~
 - [x] ~~SPEC 16: tests con `pytest` (config, audio, `PushToTalk` con dobles; los que usen GPU, marcados y excluidos por defecto).~~
+- [x] ~~SPEC 17: log rotativo en `$XDG_STATE_HOME/speechflow/speechflow.log` (1 MB x 3 copias, permisos `0600`).~~
 
-Fase 3 (después): servicio `systemd` de usuario, archivo de log con rotación y bandeja del sistema.
+Fase 3 (después): servicio `systemd` de usuario y bandeja del sistema.
 
 ## Audio y captura
 
@@ -53,7 +54,7 @@ Fase 3 (después): servicio `systemd` de usuario, archivo de log con rotación y
 
 ## Log y diagnóstico
 
-- [ ] Archivo de log, rotación y carpeta `logs/` (SPEC 07).
+- [x] ~~Archivo de log, rotación y carpeta `logs/` (SPEC 07).~~ (SPEC 17, en `state_dir()` y sin carpeta `logs/`)
 - [ ] Opciones `--quiet` / `--verbose` y niveles configurables (SPEC 07).
 - [ ] Log en `capture_mic.py`, `benchmark_stt.py` y `audio.py` (SPEC 07).
 - [ ] Formato JSON, colores y zona horaria en el log (SPEC 07).

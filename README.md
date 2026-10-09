@@ -95,7 +95,7 @@ print(f"{seconds:.2f} s: {text}")
 - `src/speechflow/inserter.py`: `insert_text(text)` escribe el texto en la ventana con foco con `xdotool type --clearmodifiers`.
 - `src/speechflow/notifier.py`: `notify(title, body)` envía una notificación de escritorio con `notify-send`; si no está instalado o están desactivadas con `set_enabled(False)`, no hace nada.
 - `src/speechflow/config.py`: configuración de usuario de la app de push-to-talk (`Config`, `find_config()`, `load_config()`, `write_emergency()` y el estado del micrófono con `load_state_device()` / `save_state_device()`). Ver [Configuración](#configuración).
-- `src/speechflow/log.py`: `setup_logging()` configura el logger `speechflow` con el formato `AAAA-MM-DD HH:MM:SS.mmm NIVEL mensaje` (hora local). Las líneas `INFO` salen por stdout y las `WARNING` y `ERROR` por stderr. Es idempotente. `log_banner()` imprime por stdout, sin prefijo, el arte ASCII de SpeechFlow con su versión y la de `faster-whisper`; `app.py` lo muestra justo antes de `Cargando ...`, una vez superadas las validaciones de arranque. Por ahora solo lo usa `app.py`.
+- `src/speechflow/log.py`: `setup_logging()` configura el logger `speechflow` con el formato `AAAA-MM-DD HH:MM:SS.mmm NIVEL mensaje` (hora local). Las líneas `INFO` salen por stdout y las `WARNING` y `ERROR` por stderr. Es idempotente. Añade un tercer manejador, un `RotatingFileHandler` en `speechflow.log` (ver [Configuración](#configuración)): mismas líneas `INFO`, `WARNING` y `ERROR` y mismo formato que la consola, 1 MB por archivo y 3 copias (`speechflow.log.1` a `.3`, unos 4 MB como máximo), con permisos `0600` también tras rotar. Si el archivo no se puede abrir, registra `No se puede escribir el log en ...` y sigue solo con consola. `log_banner()` imprime por stdout, sin prefijo, el arte ASCII de SpeechFlow con su versión y la de `faster-whisper`; `app.py` lo muestra justo antes de `Cargando ...`, una vez superadas las validaciones de arranque. Por ahora solo lo usa `app.py`.
 
 ## Push-to-talk
 
@@ -196,8 +196,11 @@ Rutas de usuario (estándar XDG; una variable `XDG_*` vacía o con ruta relativa
 | Configuración (la editas tú) | `$XDG_CONFIG_HOME/speechflow/config.toml` | `~/.config/speechflow/config.toml` |
 | Plantilla de emergencia | `$XDG_CONFIG_HOME/speechflow/config.emergency.toml` | `~/.config/speechflow/config.emergency.toml` |
 | Estado (lo escribe el script) | `$XDG_STATE_HOME/speechflow/state.toml` | `~/.local/state/speechflow/state.toml` |
+| Log (lo escribe el script) | `$XDG_STATE_HOME/speechflow/speechflow.log` | `~/.local/state/speechflow/speechflow.log` |
 
-Las carpetas se crean al escribir la plantilla o el estado. Un `speechflow.toml`, `speechflow.emergency.toml` o `.speechflow-state.toml` en la raíz del repo (rutas anteriores) se ignora y **no se migra** ni se avisa de ello: muévelos a mano a las rutas nuevas (`speechflow.toml` → `config.toml`, `.speechflow-state.toml` → `state.toml`).
+Las carpetas se crean al escribir la plantilla, el estado o el log. Un `speechflow.toml`, `speechflow.emergency.toml` o `.speechflow-state.toml` en la raíz del repo (rutas anteriores) se ignora y **no se migra** ni se avisa de ello: muévelos a mano a las rutas nuevas (`speechflow.toml` → `config.toml`, `.speechflow-state.toml` → `state.toml`).
+
+**Log en archivo:** `speechflow.log` repite las líneas `INFO`, `WARNING` y `ERROR` de la consola (no el banner). Rota al llegar a 1 MB y conserva 3 copias (`speechflow.log.1` a `.3`), así que ocupa unos 4 MB como máximo. **Contiene el texto dictado** (`Insertado (...): {texto}`), por eso se crea con permisos `0600`. Para borrarlo: `rm ~/.local/state/speechflow/speechflow.log*`. Siempre está activo y no tiene opciones de configuración.
 
 `speechflow.example.toml` es un ejemplo con todas las claves comentadas; cópialo a `~/.config/speechflow/config.toml`. Todas las claves son opcionales:
 
