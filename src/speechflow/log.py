@@ -1,14 +1,18 @@
 """Configuración del log de consola: INFO a stdout, WARNING y ERROR a stderr."""
 import logging
+import os
 import sys
 import time
 from importlib.metadata import PackageNotFoundError, version
+from logging.handlers import RotatingFileHandler
 
 from speechflow import __version__
 
 LOGGER_NAME = "speechflow"
 FORMAT = "%(asctime)s.%(msecs)03d %(levelname)-7s %(message)s"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+LOG_MAX_BYTES = 1_048_576
+LOG_BACKUP_COUNT = 3
 
 BANNER_ART = r"""
 ________                       ______ _______________
@@ -31,6 +35,14 @@ class _FlushingStreamHandler(logging.StreamHandler):
         self.stream = getattr(sys, self._stream_name)
         super().emit(record)
         self.flush()
+
+
+class _PrivateRotatingFileHandler(RotatingFileHandler):
+    """RotatingFileHandler que crea cada archivo (también tras rotar) con permisos 0600."""
+
+    def _open(self):
+        fd = os.open(self.baseFilename, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        return os.fdopen(fd, self.mode, encoding=self.encoding, errors=self.errors)
 
 
 def log_banner() -> None:
