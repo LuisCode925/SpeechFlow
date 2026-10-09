@@ -97,13 +97,13 @@ class TestLoadConfig:
         ruta = escribir(
             tmp_path,
             '[model]\nname = "small"\nlanguage = "en"\nidle_timeout = 60\nvad = false\n'
-            '[keys]\nrecord = "f9"\nswitch = "f10"\n'
+            '[keys]\nrecord = "f9"\nswitch = "f10"\nlanguage = "f11"\nauto = "f12"\n'
             '[audio]\ndevice = "Realtek"\nwatch_interval = 2\n'
             "[recording]\nmin_seconds = 1\nmax_seconds = 10\n"
             "[notifications]\nenabled = false\n",
         )
         c = config.load_config(ruta)
-        assert c == Config("small", "en", "f9", "f10", "Realtek", 1.0, 10.0, 2.0, False, 60.0, False)
+        assert c == Config("small", "en", "f9", "f10", "Realtek", 1.0, 10.0, 2.0, False, 60.0, False, "f11", "f12")
         assert isinstance(c.min_seconds, float)
 
     def test_device_entero(self, tmp_path):
@@ -112,6 +112,15 @@ class TestLoadConfig:
     def test_omitido_toma_defecto(self, tmp_path):
         c = config.load_config(escribir(tmp_path, '[keys]\nrecord = "f9"\n'))
         assert c.key == "f9" and c.switch_key == Config().switch_key
+
+    def test_teclas_idioma_defecto(self, tmp_path):
+        c = config.load_config(escribir(tmp_path, ""))
+        assert c.language_key == "f7" and c.auto_key == "f6"
+
+    @pytest.mark.parametrize("clave", ["language", "auto"])
+    def test_teclas_idioma_tipo_invalido(self, tmp_path, clave):
+        with pytest.raises(ConfigError, match=f"keys.{clave} debe ser str, no int"):
+            config.load_config(escribir(tmp_path, f"[keys]\n{clave} = 1\n"))
 
     def test_archivo_inexistente(self, tmp_path):
         with pytest.raises(ConfigError, match="no se puede leer"):

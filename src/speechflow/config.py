@@ -24,6 +24,8 @@ class Config:
     notifications: bool = True
     idle_timeout: float = 0.0  # [model] idle_timeout, en segundos; 0 = desactivado
     vad: bool = True  # [model] vad; filtra silencios con Silero antes de transcribir
+    language_key: str = "f7"  # [keys] language; alterna es <-> en
+    auto_key: str = "f6"  # [keys] auto; activa o desactiva la detección automática de idioma
 
 
 class ConfigError(Exception):
@@ -38,7 +40,12 @@ _SCHEMA: dict[str, dict[str, tuple[tuple[type, ...], str]]] = {
         "idle_timeout": ((int, float), "idle_timeout"),
         "vad": ((bool,), "vad"),
     },
-    "keys": {"record": ((str,), "key"), "switch": ((str,), "switch_key")},
+    "keys": {
+        "record": ((str,), "key"),
+        "switch": ((str,), "switch_key"),
+        "language": ((str,), "language_key"),
+        "auto": ((str,), "auto_key"),
+    },
     "audio": {"device": ((int, str), "device"), "watch_interval": ((int, float), "watch_interval")},
     "recording": {"min_seconds": ((int, float), "min_seconds"), "max_seconds": ((int, float), "max_seconds")},
     "notifications": {"enabled": ((bool,), "notifications")},
@@ -142,6 +149,8 @@ def _emergency_template() -> str:
         "[keys]\n"
         f"record = {json.dumps(d.key)}\n"
         f"switch = {json.dumps(d.switch_key)}\n"
+        f"language = {json.dumps(d.language_key)}  # alterna es <-> en en caliente\n"
+        f"auto = {json.dumps(d.auto_key)}  # activa o desactiva la detección automática de idioma\n"
         "\n"
         "[audio]\n"
         '# device = "Realtek"  # índice (entero) o parte del nombre; sin definir se usa la entrada por defecto\n'
