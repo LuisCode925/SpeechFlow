@@ -39,6 +39,32 @@ def test_carga_el_modelo_en_gpu_y_lo_calienta(modelo):
     assert len(audio) == SAMPLE_RATE and kwargs == {"language": "en"}
 
 
+def test_calentamiento_con_vad_hace_dos_llamadas(modelo):
+    Transcriber("small", "en", vad=True)
+    llamadas = modelo.instancias[0].llamadas
+    assert [k for _, k in llamadas] == [{"language": "en"}, {"language": "en", "vad_filter": True}]
+    assert all(len(a) == SAMPLE_RATE for a, _ in llamadas)
+
+
+def test_calentamiento_sin_vad_hace_una_llamada(modelo):
+    Transcriber("small", "en", vad=False)
+    assert [k for _, k in modelo.instancias[0].llamadas] == [{"language": "en"}]
+
+
+def test_vad_activo_por_defecto(modelo):
+    assert Transcriber().vad is True
+
+
+def test_transcribe_pasa_vad_filter(modelo):
+    Transcriber().transcribe(np.ones(10, dtype=np.int16))
+    assert modelo.instancias[0].llamadas[-1][1] == {"language": "es", "vad_filter": True}
+
+
+def test_transcribe_sin_vad_pasa_false(modelo):
+    Transcriber(vad=False).transcribe(np.ones(10, dtype=np.int16))
+    assert modelo.instancias[0].llamadas[-1][1] == {"language": "es", "vad_filter": False}
+
+
 def test_valores_por_defecto(modelo):
     t = Transcriber()
     assert modelo.instancias[0].nombre == "medium" and t.language == "es"
@@ -47,7 +73,7 @@ def test_valores_por_defecto(modelo):
 def test_audio_vacio_no_llama_al_modelo(modelo):
     t = Transcriber()
     assert t.transcribe(np.zeros((0, 1), dtype=np.int16)) == ("", 0.0)
-    assert len(modelo.instancias[0].llamadas) == 1  # solo el calentamiento
+    assert len(modelo.instancias[0].llamadas) == 2  # solo los dos calentamientos
 
 
 def test_convierte_a_float32_normalizado_y_1d(modelo):
@@ -55,7 +81,7 @@ def test_convierte_a_float32_normalizado_y_1d(modelo):
     t.transcribe(np.full((100, 1), 16384, dtype=np.int16))
     muestras, kwargs = modelo.instancias[0].llamadas[-1]
     assert muestras.dtype == np.float32 and muestras.shape == (100,)
-    assert muestras[0] == pytest.approx(0.5) and kwargs == {"language": "es"}
+    assert muestras[0] == pytest.approx(0.5) and kwargs == {"language": "es", "vad_filter": True}
 
 
 def test_une_segmentos_y_mide_tiempo(modelo):
