@@ -16,11 +16,19 @@ class WhisperModelFalso:
         self.kwargs = kwargs
         self.llamadas = []
         self.textos = [" hola ", "mundo "]
+        self.detecciones = []
+        self.probabilidades = [("es", 0.6), ("en", 0.3)]
         WhisperModelFalso.instancias.append(self)
 
     def transcribe(self, audio, **kwargs):
         self.llamadas.append((audio, kwargs))
         return iter([SimpleNamespace(text=t) for t in self.textos]), None
+
+    def detect_language(self, audio, **kwargs):
+        self.detecciones.append(audio)
+        if isinstance(self.probabilidades, Exception):
+            raise self.probabilidades
+        return self.probabilidades[0][0], self.probabilidades[0][1], self.probabilidades
 
 
 @pytest.fixture
@@ -100,3 +108,93 @@ def test_close_es_idempotente(modelo):
     t = Transcriber()
     t.close()
     t.close()
+
+
+def test_calentamiento_detecta_idioma_sobre_silencio(modelo):
+    Transcriber("small", "en")
+    (silencio,) = modelo.instancias[0].detecciones
+    assert len(silencio) == SAMPLE_RATE and not silencio.any()
+
+
+def test_calentamiento_en_auto_usa_idioma_fijo_por_defecto(modelo):
+    Transcriber("small", "auto")
+    assert [k["language"] for _, k in modelo.instancias[0].llamadas] == ["es", "es"]
+
+
+def test_idioma_explicito_gana_sobre_el_del_objeto(modelo):
+    t = Transcriber(language="es")
+    t.transcribe(np.ones(10, dtype=np.int16), language="en")
+    assert modelo.instancias[0].llamadas[-1][1] == {"language": "en", "vad_filter": True}
+    assert t.last_language == "en" and t.language == "es"
+
+
+def test_idioma_por_defecto_es_el_del_objeto(modelo):
+    t = Transcriber(language="en")
+    t.transcribe(np.ones(10, dtype=np.int16))
+    assert modelo.instancias[0].llamadas[-1][1]["language"] == "en" and t.last_language == "en"
+
+
+def test_last_language_inicial_es_none(modelo):
+    assert Transcriber().last_language is None
+
+
+@pytest.mark.parametrize("probabilidades, esperado", [
+    ([("es", 0.7), ("en", 0.2)], "es"),
+    ([("en", 0.7), ("es", 0.2)], "en"),
+    ([("fr", 0.8), ("en", 0.12), ("es", 0.05)], "en"),  # otro idioma con la mayor probabilidad
+    ([("de", 0.8), ("es", 0.12), ("en", 0.05)], "es"),
+])
+def test_auto_elige_entre_es_y_en(modelo, probabilidades, esperado):
+    t = Transcriber(language="auto")
+    modelo.instancias[0].probabilidades = probabilidades
+    t.transcribe(np.ones(10, dtype=np.int16))
+    assert t.last_language == esperado
+    assert modelo.instancias[0].llamadas[-1][1] == {"language": esperado, "vad_filter": True}
+
+
+def test_auto_pasado_por_parametro(modelo):
+    t = Transcriber(language="es")
+    modelo.instancias[0].probabilidades = [("en", 0.9), ("es", 0.05)]
+    t.transcribe(np.ones(10, dtype=np.int16), language="auto")
+    assert t.last_language == "en" and t.language == "es"
+
+
+def test_auto_detecta_sobre_el_audio_normalizado(modelo):
+    t = Transcriber(language="auto")
+    t.transcribe(np.full((100, 1), 16384, dtype=np.int16))
+    muestras = modelo.instancias[0].detecciones[-1]
+    assert muestras.shape == (100,) and muestras[0] == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize("fallo", [ValueError("sin voz"), []])
+def test_auto_con_fallo_de_deteccion_usa_idioma_fijo(modelo, fallo):
+    t = Transcriber(language="auto")
+    modelo.instancias[0].probabilidades = fallo
+    texto, _ = t.transcribe(np.zeros(16000, dtype=np.int16))
+    assert t.last_language == "es" and texto == "hola mundo"
+
+
+def test_auto_con_fallo_usa_el_idioma_fijo_si_es_candidato(modelo):
+    t = Transcriber(language="en")
+    modelo.instancias[0].probabilidades = ValueError("sin voz")
+    t.transcribe(np.zeros(16000, dtype=np.int16), language="auto")
+    assert t.last_language == "en"
+
+
+def test_auto_con_idioma_fijo_ajeno_cae_a_es(modelo):
+    t = Transcriber(language="fr")
+    modelo.instancias[0].probabilidades = ValueError("sin voz")
+    t.transcribe(np.zeros(16000, dtype=np.int16), language="auto")
+    assert t.last_language == "es"
+
+
+def test_auto_sin_voz_sigue_el_camino_normal(modelo):
+    t = Transcriber(language="auto")
+    modelo.instancias[0].textos = []
+    assert t.transcribe(np.zeros(16000, dtype=np.int16))[0] == ""
+
+
+def test_audio_vacio_actualiza_last_language_sin_detectar(modelo):
+    t = Transcriber(language="auto")
+    assert t.transcribe(np.zeros((0, 1), dtype=np.int16)) == ("", 0.0)
+    assert t.last_language == "es" and len(modelo.instancias[0].detecciones) == 1  # solo el calentamiento
