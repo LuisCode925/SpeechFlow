@@ -501,6 +501,12 @@ def load_transcriber(model: str, language: str, vad: bool = True) -> Transcriber
     return transcriber
 
 
+def ready_message(key_name: str, mode: str) -> str:
+    if mode == "toggle":
+        return f"Listo. Pulsa la tecla {key_name!r} para empezar a dictar y púlsala de nuevo para parar. Ctrl+C para salir."
+    return f"Listo. Mantén pulsada la tecla {key_name!r} para dictar. Ctrl+C para salir."
+
+
 def resolve_config(explicit: Path | None) -> Config:
     """Carga la configuración de usuario; si falta o es inválida, avisa, deja la plantilla de emergencia y usa los defectos."""
     if explicit is not None and not explicit.is_file():
@@ -608,9 +614,9 @@ def main() -> None:
     logger.info(f"Dispositivo de audio: {describe_device(device)}")
     logger.info(f"Cambio de entrada de audio: tecla {switch_key_name!r}.")
     logger.info(f"Cambio de idioma: tecla {config.language_key!r}; modo automático: tecla {config.auto_key!r}.")
-    logger.info(f"Listo. Mantén pulsada la tecla {key_name!r} para dictar. Ctrl+C para salir.")
+    logger.info(ready_message(key_name, config.mode))
 
-    push_to_talk = PushToTalk(key, switch_key, device, transcriber, model, language, config.min_seconds, config.max_seconds, config.idle_timeout, config.vad, language_key, auto_key)
+    push_to_talk = PushToTalk(key, switch_key, device, transcriber, model, language, config.min_seconds, config.max_seconds, config.idle_timeout, config.vad, language_key, auto_key, config.mode)
     push_to_talk.start_watcher(config.watch_interval)
     listener = keyboard.Listener(on_press=push_to_talk.on_press, on_release=push_to_talk.on_release)
     closing = threading.Event()  # la primera señal lo marca; una segunda fuerza la salida

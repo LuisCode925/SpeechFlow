@@ -127,6 +127,16 @@ class TestLoadTranscriber:
         assert subprocess_falso == []
 
 
+class TestReadyMessage:
+    def test_hold(self):
+        assert app.ready_message("ctrl_r", "hold") == "Listo. Mantén pulsada la tecla 'ctrl_r' para dictar. Ctrl+C para salir."
+
+    def test_toggle(self):
+        assert app.ready_message("ctrl_r", "toggle") == (
+            "Listo. Pulsa la tecla 'ctrl_r' para empezar a dictar y púlsala de nuevo para parar. Ctrl+C para salir."
+        )
+
+
 class TestResolveConfig:
     def mensajes(self, caplog):
         return [(r.levelname, r.getMessage()) for r in caplog.records]
