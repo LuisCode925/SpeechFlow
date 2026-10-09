@@ -7,6 +7,7 @@ from importlib.metadata import PackageNotFoundError, version
 from logging.handlers import RotatingFileHandler
 
 from speechflow import __version__
+from speechflow.config import log_path, state_dir
 
 LOGGER_NAME = "speechflow"
 FORMAT = "%(asctime)s.%(msecs)03d %(levelname)-7s %(message)s"
@@ -79,4 +80,26 @@ def setup_logging() -> logging.Logger:
     logger.addHandler(out)
     logger.addHandler(err)
     logger.propagate = False
+    _add_file_handler(logger, formatter)
     return logger
+
+
+def _add_file_handler(logger: logging.Logger, formatter: logging.Formatter) -> None:
+    """Añade el log rotativo en archivo; si no se puede abrir, avisa y sigue solo con consola."""
+    path = None
+    try:
+        path = log_path()
+        state_dir().mkdir(parents=True, exist_ok=True)
+        handler = _PrivateRotatingFileHandler(
+            path, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT, encoding="utf-8"
+        )
+    except (OSError, RuntimeError) as error:
+        logger.warning(
+            "No se puede escribir el log en %s: %s. Solo habrá log por consola.",
+            path if path is not None else "(ruta desconocida)",
+            error,
+        )
+        return
+    handler.setLevel(logging.INFO)
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
