@@ -39,6 +39,7 @@ from speechflow.config import Config, ConfigError, find_config, load_config, loa
 from speechflow.inserter import insert_text
 from speechflow.log import LOGGER_NAME, log_banner, setup_logging
 from speechflow.notifier import notify, set_enabled
+from speechflow.punctuation import apply_voice_punctuation
 from speechflow.transcriber import AUTO_LANGUAGE, COMPUTE_TYPE, DEFAULT_LANGUAGE, SAMPLE_RATE, Transcriber
 
 logger = logging.getLogger(LOGGER_NAME)
@@ -70,8 +71,10 @@ class PushToTalk:
         language_key: keyboard.Key | keyboard.KeyCode | None = None,
         auto_key: keyboard.Key | keyboard.KeyCode | None = None,
         mode: str = "hold",
+        punctuation_commands: bool = False,
     ) -> None:
         self.key = key
+        self.punctuation_commands = punctuation_commands  # se lee solo al arrancar
         self.mode = mode  # "hold" o "toggle"; se lee solo al arrancar
         self.switch_key = switch_key
         self.language_key = language_key  # None = sin tecla
@@ -372,8 +375,13 @@ class PushToTalk:
             if not text:
                 logger.info(f"Sin texto reconocido ({seconds:.2f} s, {label}).")
                 return
+            original = text
+            if self.punctuation_commands:
+                text = apply_voice_punctuation(text, transcriber.last_language)
             insert_text(text)
             realtime = seconds / (len(audio) / SAMPLE_RATE)
+            if text != original:
+                logger.info(f"Texto original: {original}")
             logger.info(f"Insertado ({seconds:.2f} s, {realtime:.2f}x tiempo real, {len(text)} caracteres, {label}): {text}")
         except Exception as error:
             logger.error(f"Error: {error}")
@@ -619,7 +627,7 @@ def main() -> None:
     logger.info(f"Cambio de idioma: tecla {config.language_key!r}; modo automático: tecla {config.auto_key!r}.")
     logger.info(ready_message(key_name, config.mode))
 
-    push_to_talk = PushToTalk(key, switch_key, device, transcriber, model, language, config.min_seconds, config.max_seconds, config.idle_timeout, config.vad, language_key, auto_key, config.mode)
+    push_to_talk = PushToTalk(key, switch_key, device, transcriber, model, language, config.min_seconds, config.max_seconds, config.idle_timeout, config.vad, language_key, auto_key, config.mode, config.punctuation_commands)
     push_to_talk.start_watcher(config.watch_interval)
     listener = keyboard.Listener(on_press=push_to_talk.on_press, on_release=push_to_talk.on_release)
     closing = threading.Event()  # la primera señal lo marca; una segunda fuerza la salida

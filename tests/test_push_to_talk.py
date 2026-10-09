@@ -303,6 +303,61 @@ class TestDictation:
         esperar_idle(ptt)
 
 
+class TestPuntuacionPorVoz:
+    def dictar(self, ptt, dobles):
+        ptt.on_press(R)
+        ptt.on_release(R)
+        assert dobles.insertado.wait(2)
+        esperar_idle(ptt)
+
+    def test_inserta_el_texto_procesado(self, crear_ptt, dobles):
+        ptt = crear_ptt(transcriber=TranscriberFalso(texto="hola coma mundo punto"), punctuation_commands=True)
+        self.dictar(ptt, dobles)
+        assert dobles.textos == ["Hola, mundo."]
+
+    def test_con_la_clave_apagada_inserta_el_texto_intacto(self, crear_ptt, dobles, caplog):
+        ptt = crear_ptt(transcriber=TranscriberFalso(texto="hola coma mundo punto"), punctuation_commands=False)
+        self.dictar(ptt, dobles)
+        assert dobles.textos == ["hola coma mundo punto"]
+        assert not any(m.startswith("Texto original") for m in mensajes(caplog))
+
+    def test_por_defecto_esta_apagada(self, crear_ptt):
+        assert crear_ptt().punctuation_commands is False
+
+    def test_en_auto_usa_el_idioma_detectado(self, crear_ptt, dobles):
+        ptt = crear_ptt(transcriber=TranscriberFalso(texto="hello comma world period", detectado="en"), language="auto", punctuation_commands=True)
+        self.dictar(ptt, dobles)
+        assert dobles.textos == ["Hello, world."]
+
+    def test_idioma_sin_vocabulario_no_se_toca(self, crear_ptt, dobles, caplog):
+        ptt = crear_ptt(transcriber=TranscriberFalso(texto="bonjour point", detectado="fr"), language="auto", punctuation_commands=True)
+        self.dictar(ptt, dobles)
+        assert dobles.textos == ["bonjour point"]
+        assert not any(m.startswith("Texto original") for m in mensajes(caplog))
+
+    def test_log_muestra_el_original_antes_de_insertado(self, crear_ptt, dobles, caplog):
+        ptt = crear_ptt(transcriber=TranscriberFalso(texto="hola punto"), punctuation_commands=True)
+        self.dictar(ptt, dobles)
+        log = mensajes(caplog)
+        original = log.index("Texto original: hola punto")
+        assert log[original + 1].startswith("Insertado (") and log[original + 1].endswith("): Hola.")
+        assert "5 caracteres" in log[original + 1]
+
+    def test_sin_cambios_no_hay_linea_de_texto_original(self, crear_ptt, dobles, caplog):
+        ptt = crear_ptt(transcriber=TranscriberFalso(texto="Hola mundo"), punctuation_commands=True)
+        self.dictar(ptt, dobles)
+        assert dobles.textos == ["Hola mundo"]
+        assert not any(m.startswith("Texto original") for m in mensajes(caplog))
+
+    def test_sin_texto_no_se_procesa(self, crear_ptt, dobles, caplog):
+        ptt = crear_ptt(transcriber=TranscriberFalso(texto=""), punctuation_commands=True)
+        ptt.on_press(R)
+        ptt.on_release(R)
+        esperar_idle(ptt)
+        assert dobles.textos == []
+        assert "Sin texto reconocido (0.10 s, medium/es)." in mensajes(caplog)
+
+
 class TestModoToggle:
     def test_primera_pulsacion_graba_y_soltar_no_para(self, crear_ptt, caplog):
         ptt = crear_ptt(mode="toggle")
