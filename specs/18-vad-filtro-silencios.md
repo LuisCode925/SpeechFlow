@@ -1,6 +1,6 @@
 # SPEC 18 — VAD y filtrado de silencios
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 04, SPEC 10, SPEC 12, SPEC 16
 > **Fecha:** 2026-10-09
 > **Objetivo:** Activar el filtro de voz `vad_filter` (Silero) de `faster-whisper` en cada transcripción, con la clave `[model] vad` (defecto `true`) para desactivarlo, de modo que los silencios no lleguen a Whisper ni produzcan texto inventado.

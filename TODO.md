@@ -20,7 +20,7 @@ Orden recomendado: 1 → 2 → 4 → 8 → 10 → 9. La GUI será una capa fina 
 
 Alto valor, esfuerzo bajo:
 
-- [ ] 1. VAD (`vad_filter` de `faster-whisper`, Silero) y recorte de silencios: menos alucinaciones en silencio y transcripción más rápida.
+- [x] ~~1. VAD (`vad_filter` de `faster-whisper`, Silero) y recorte de silencios: menos alucinaciones en silencio y transcripción más rápida.~~ (SPEC 18, `[model] vad`)
 - [ ] 2. Cambio de idioma en caliente (es/en) con tecla nueva en `[keys]`, y detección automática de idioma como modo opcional.
 - [ ] 3. Opciones `--quiet` / `--verbose` y niveles de log configurables.
 - [ ] 4. Modo toggle (pulsar para empezar, pulsar para parar), para dictados largos.
@@ -42,7 +42,7 @@ Pueden esperar: soporte Wayland y reducción de ruido.
 
 ## Audio y captura
 
-- [ ] VAD (detección de actividad de voz) y recorte de silencios (SPEC 01, 03, 04, 05).
+- [x] ~~VAD (detección de actividad de voz) y recorte de silencios (SPEC 01, 03, 04, 05).~~ (SPEC 18, con `vad_filter` de `faster-whisper`; sin recorte propio)
 - [ ] Streaming de la captura y de la transcripción (SPEC 03, 04, 05).
 - [ ] Reducción de ruido (SPEC 03).
 - [x] ~~Persistencia del dispositivo de audio elegido entre ejecuciones (SPEC 08).~~ (SPEC 10)

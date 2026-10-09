@@ -85,7 +85,8 @@ print(f"{seconds:.2f} s: {text}")
 
 - **Entrada:** `numpy.ndarray` `int16`, mono, a 16 kHz. El módulo no valida la tasa: un audio a otra tasa da transcripciones erróneas sin aviso.
 - **Salida:** `(texto, segundos)`. Los segundos no incluyen la carga del modelo ni el calentamiento. Un array vacío devuelve `("", 0.0)` sin invocar al modelo.
-- **Parámetros:** modelo (defecto `medium`) e idioma (defecto `es`, fijo, sin detección automática).
+- **Parámetros:** modelo (defecto `medium`), idioma (defecto `es`, fijo, sin detección automática) y `vad` (defecto `True`).
+- **VAD:** con `vad=True`, cada transcripción usa `vad_filter` de `faster-whisper` (Silero, parámetros por defecto: se descartan silencios de 2 s o más, con 400 ms de margen), para que el silencio y el ruido sin voz no produzcan texto inventado. Una grabación sin voz devuelve texto vacío. El calentamiento hace una llamada extra con el filtro para cargar Silero al arrancar. `vad=False` lo desactiva.
 - **Liberación:** `close()` suelta la referencia al modelo y fuerza la recolección de basura para liberar la GPU. Es idempotente; no se debe llamar a `transcribe()` después.
 - `scripts/capture_mic.py` usa este módulo.
 
@@ -169,6 +170,7 @@ Opciones:
 Un argumento escrito en la línea de comandos gana sobre el archivo de configuración (ver [Configuración](#configuración)).
 
 - **Modelo:** se carga al arrancar, así que cada dictado responde rápido. Con `medium` int8 en la GTX 1060, ~11 s de audio tardaron 1.03 s. Con `[model] idle_timeout` desactivado (`0`, el defecto) no se vuelve a cargar.
+- **Filtro de silencios (VAD):** con `[model] vad = true` (el defecto) Whisper solo recibe los tramos con voz, así que pulsar la tecla sin hablar registra `Sin texto reconocido (...)` y no inserta nada. Solo se recortan silencios de 2 s o más. Si recorta palabras con tu voz o tu micrófono, pon `vad = false`. El ajuste se lee al arrancar, aparece como `VAD: sí/no` en la línea `Modelo: ...` y se conserva al recargar el modelo tras una descarga por inactividad. `vad = 1` o `vad = "si"` hacen inválido el archivo.
 - **Descarga por inactividad:** con `[model] idle_timeout = N` (`N` ≥ 30; `0` desactiva), tras `N` segundos en reposo sin dictar el modelo se libera de la GPU y se registra `Modelo {modelo} liberado por inactividad ({N} s sin uso).`. La cuenta empieza cada vez que el script vuelve a reposo: tras una transcripción, tras una grabación descartada por corta o tras una recarga fallida. No se libera mientras se graba ni se transcribe. No envía notificación de escritorio. Si `close()` no devuelve toda la VRAM (la caché de CUDA puede retener algo), esa memoria sigue ocupada hasta salir del proceso.
 - **Recarga bajo demanda:** con el modelo descargado, pulsar la tecla de grabar abre el micrófono, empieza a grabar al instante y carga el modelo en paralelo (`Modelo descargado: se carga {modelo} mientras grabas.`, `Cargando ...`, `Modelo cargado en ...`). Al soltar, la transcripción espera a que acabe la carga y no se pierde nada de lo dictado. Si el micrófono falla al abrir, no se carga nada. Si la recarga falla, se registra `Error al recargar el modelo: ...`, se envía una notificación de error, se descarta el audio y la siguiente pulsación reintenta. La recarga con éxito no notifica.
 - **Grabaciones cortas:** las de menos de 0.5 s (`[recording] min_seconds`) se descartan sin invocar al modelo (evita escribir texto basura por toques accidentales).
@@ -209,6 +211,7 @@ Las carpetas se crean al escribir la plantilla, el estado o el log. Un `speechfl
 name = "medium"
 language = "es"
 idle_timeout = 0.0          # segundos sin dictar antes de liberar el modelo de la GPU; 0 desactiva; mínimo 30.0
+vad = true                  # filtra silencios y ruido sin voz antes de transcribir; false desactiva
 
 [keys]
 record = "ctrl_r"
