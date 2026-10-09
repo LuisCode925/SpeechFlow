@@ -1,6 +1,6 @@
 # SPEC 19 — Cambio de idioma en caliente y detección automática
 
-> **Estado:** Implementado
+> **Estado:** Aprobado
 > **Depende de:** SPEC 04, SPEC 05, SPEC 08, SPEC 10, SPEC 12, SPEC 16, SPEC 18
 > **Fecha:** 2026-10-09
 > **Objetivo:** Añadir dos teclas globales en `[keys]` (`language`, defecto `f7`, alterna es↔en; `auto`, defecto `f6`, activa o desactiva la detección automática restringida a es/en) que cambian el idioma de la transcripción en caliente y lo guardan en `state.toml`.
