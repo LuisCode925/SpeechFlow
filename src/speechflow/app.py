@@ -32,11 +32,11 @@ import sounddevice as sd
 from pynput import keyboard
 
 from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, device_index, device_name, input_device_by_name, list_devices, next_input_device, parse_device, refresh_devices
-from speechflow.config import Config, ConfigError, find_config, load_config, load_state_device, save_state_device, user_config_path, write_emergency
+from speechflow.config import Config, ConfigError, find_config, load_config, load_state_device, save_state_device, save_state_language, user_config_path, write_emergency
 from speechflow.inserter import insert_text
 from speechflow.log import LOGGER_NAME, log_banner, setup_logging
 from speechflow.notifier import notify, set_enabled
-from speechflow.transcriber import AUTO_LANGUAGE, COMPUTE_TYPE, SAMPLE_RATE, Transcriber
+from speechflow.transcriber import AUTO_LANGUAGE, COMPUTE_TYPE, DEFAULT_LANGUAGE, SAMPLE_RATE, Transcriber
 
 logger = logging.getLogger(LOGGER_NAME)
 
@@ -64,11 +64,16 @@ class PushToTalk:
         max_seconds: float,
         idle_timeout: float,
         vad: bool = True,
+        language_key: keyboard.Key | keyboard.KeyCode | None = None,
+        auto_key: keyboard.Key | keyboard.KeyCode | None = None,
     ) -> None:
         self.key = key
         self.switch_key = switch_key
+        self.language_key = language_key  # None = sin tecla
+        self.auto_key = auto_key
         self.model_name = model_name
         self.language = language  # mutable: fuente de verdad del idioma, también para recargar
+        self._last_fixed_language = DEFAULT_LANGUAGE if language == AUTO_LANGUAGE else language  # al que vuelve auto
         self.min_seconds = min_seconds  # por debajo no se transcribe ni se escribe nada
         self.max_seconds = max_seconds  # la grabación se corta sola
         self.recorder = Recorder(device)
@@ -83,6 +88,8 @@ class PushToTalk:
         self.state = State.IDLE
         self._held = False  # la tecla sigue pulsada; filtra las repeticiones automáticas
         self._switch_held = False  # ídem para la tecla de cambio
+        self._language_held = False  # ídem para la tecla de idioma
+        self._auto_held = False  # ídem para la tecla de modo automático
         self._timer: threading.Timer | None = None
         self._lock = threading.Lock()
         self._watched_name = device_name(device)  # micrófono vigilado, por nombre (los índices cambian al refrescar)
@@ -98,6 +105,18 @@ class PushToTalk:
                 was_held, self._switch_held = self._switch_held, True
             if not was_held:
                 self.switch_device()
+            return
+        if self.language_key is not None and key == self.language_key:
+            with self._lock:
+                was_held, self._language_held = self._language_held, True
+            if not was_held:
+                self.switch_language()
+            return
+        if self.auto_key is not None and key == self.auto_key:
+            with self._lock:
+                was_held, self._auto_held = self._auto_held, True
+            if not was_held:
+                self.toggle_auto()
             return
         if key != self.key:
             return
@@ -134,6 +153,14 @@ class PushToTalk:
         if key == self.switch_key:
             with self._lock:
                 self._switch_held = False
+            return
+        if self.language_key is not None and key == self.language_key:
+            with self._lock:
+                self._language_held = False
+            return
+        if self.auto_key is not None and key == self.auto_key:
+            with self._lock:
+                self._auto_held = False
             return
         if key != self.key:
             return
@@ -175,6 +202,38 @@ class PushToTalk:
                 save_state_device(name)
             except (OSError, RuntimeError) as error:
                 logger.warning(f"No se pudo guardar la entrada de audio en state.toml: {error}")
+
+    def switch_language(self) -> None:
+        """Alterna es <-> en (otro idioma pasa a es); desde auto fija el otro respecto al último fijo. Solo en IDLE."""
+        with self._lock:
+            base = self._last_fixed_language if self.language == AUTO_LANGUAGE else self.language
+            self._set_language("en" if base == "es" else "es")
+
+    def toggle_auto(self) -> None:
+        """Activa la detección automática (recordando el idioma fijo) o vuelve al último fijo. Solo en IDLE."""
+        with self._lock:
+            if self.language == AUTO_LANGUAGE:
+                self._set_language(self._last_fixed_language)
+            else:
+                self._set_language(AUTO_LANGUAGE)
+
+    def _set_language(self, new_language: str) -> None:
+        """Aplica el cambio de idioma, lo registra, lo notifica y lo guarda. Llamar con el lock tomado."""
+        if self._closing:
+            return
+        if self.state is not State.IDLE:
+            logger.warning("No se cambia el idioma mientras se graba o se transcribe.")
+            return
+        self.language = new_language
+        if new_language != AUTO_LANGUAGE:
+            self._last_fixed_language = new_language
+        shown = "automático (es/en)" if new_language == AUTO_LANGUAGE else new_language
+        logger.info(f"Idioma cambiado: {shown}")
+        notify("SpeechFlow", f"Idioma: {shown}")
+        try:
+            save_state_language(new_language)
+        except (OSError, RuntimeError) as error:
+            logger.warning(f"No se pudo guardar el idioma en state.toml: {error}")
 
     def start_watcher(self, interval: float) -> None:
         """Lanza el hilo que comprueba cada `interval` s que el micrófono seleccionado sigue conectado."""

@@ -266,6 +266,8 @@ def crear_ptt(dobles, caplog):
             max_seconds,
             idle_timeout,
             vad,
+            keyboard.KeyCode.from_char("l"),
+            keyboard.KeyCode.from_char("a"),
         )
         creados.append(ptt)
         return ptt

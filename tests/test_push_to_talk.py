@@ -15,6 +15,8 @@ from conftest import TranscriberFalso, dispositivo, esperar
 R = keyboard.KeyCode.from_char("r")  # tecla de dictado
 F = keyboard.KeyCode.from_char("f")  # tecla de cambio de entrada
 OTRA = keyboard.KeyCode.from_char("x")
+L = keyboard.KeyCode.from_char("l")  # tecla de idioma
+A = keyboard.KeyCode.from_char("a")  # tecla de modo automático
 
 
 def mensajes(caplog, nivel=None):
@@ -57,6 +59,123 @@ class TestIdioma:
         ptt.on_release(R)
         esperar_idle(ptt)
         assert "Sin texto reconocido (0.10 s, medium/auto→en)." in mensajes(caplog)
+
+
+class TestCambioDeIdioma:
+    def test_rota_es_en_es(self, crear_ptt, dobles, caplog):
+        """f7 alterna es <-> en, registra el cambio, notifica y guarda."""
+        ptt = crear_ptt(language="es")
+        ptt.on_press(L)
+        assert ptt.language == "en"
+        assert "Idioma cambiado: en" in mensajes(caplog, "INFO")
+        assert ("SpeechFlow", "Idioma: en") in dobles.notificaciones
+        assert config.load_state_language() == "en"
+        ptt.on_release(L)
+        ptt.on_press(L)
+        assert ptt.language == "es" and config.load_state_language() == "es"
+
+    def test_otro_idioma_pasa_a_es(self, crear_ptt):
+        ptt = crear_ptt(language="fr")
+        ptt.on_press(L)
+        assert ptt.language == "es"
+
+    def test_auto_activa_y_vuelve_al_fijo(self, crear_ptt, dobles, caplog):
+        ptt = crear_ptt(language="en")
+        ptt.on_press(A)
+        assert ptt.language == "auto" and config.load_state_language() == "auto"
+        assert "Idioma cambiado: automático (es/en)" in mensajes(caplog, "INFO")
+        assert ("SpeechFlow", "Idioma: automático (es/en)") in dobles.notificaciones
+        ptt.on_release(A)
+        ptt.on_press(A)
+        assert ptt.language == "en" and config.load_state_language() == "en"
+
+    def test_auto_recuerda_un_idioma_ajeno(self, crear_ptt):
+        ptt = crear_ptt(language="fr")
+        ptt.on_press(A)
+        ptt.on_release(A)
+        ptt.on_press(A)
+        assert ptt.language == "fr"
+
+    @pytest.mark.parametrize("fijo, esperado", [("es", "en"), ("en", "es"), ("fr", "es")])
+    def test_tecla_de_idioma_desde_auto_fija_el_otro(self, crear_ptt, fijo, esperado):
+        ptt = crear_ptt(language=fijo)
+        ptt.on_press(A)
+        ptt.on_release(A)
+        ptt.on_press(L)
+        assert ptt.language == esperado
+
+    def test_arrancar_en_auto_recuerda_es(self, crear_ptt):
+        ptt = crear_ptt(language="auto")
+        ptt.on_press(A)
+        assert ptt.language == "es"
+        ptt.on_release(A)
+        ptt.on_press(A)
+        ptt.on_release(A)
+        ptt.on_press(L)
+        assert ptt.language == "en"
+
+    def test_arrancar_en_auto_y_tecla_de_idioma_da_en(self, crear_ptt):
+        ptt = crear_ptt(language="auto")
+        ptt.on_press(L)
+        assert ptt.language == "en"
+
+    @pytest.mark.parametrize("tecla", [L, A])
+    @pytest.mark.parametrize("estado", [State.RECORDING, State.TRANSCRIBING])
+    def test_solo_cambia_en_idle(self, crear_ptt, dobles, caplog, tecla, estado):
+        ptt = crear_ptt(language="es")
+        ptt.state = estado
+        ptt.on_press(tecla)
+        assert ptt.language == "es"
+        assert "No se cambia el idioma mientras se graba o se transcribe." in mensajes(caplog, "WARNING")
+        assert dobles.notificaciones == [] and config.load_state_language() is None
+
+    @pytest.mark.parametrize("tecla, esperado", [(L, "en"), (A, "auto")])
+    def test_repeticion_de_tecla_se_ignora(self, crear_ptt, tecla, esperado):
+        """Mantener pulsada la tecla cambia una sola vez."""
+        ptt = crear_ptt(language="es")
+        ptt.on_press(tecla)
+        ptt.on_press(tecla)
+        ptt.on_press(tecla)
+        assert ptt.language == esperado
+
+    def test_fallo_al_guardar_no_impide_el_cambio(self, crear_ptt, monkeypatch, caplog):
+        def falla(language):
+            raise OSError("disco lleno")
+
+        monkeypatch.setattr(app, "save_state_language", falla)
+        ptt = crear_ptt(language="es")
+        ptt.on_press(L)
+        assert ptt.language == "en"
+        assert "No se pudo guardar el idioma en state.toml: disco lleno" in mensajes(caplog, "WARNING")
+
+    def test_conserva_device_del_estado(self, crear_ptt):
+        config.save_state_device("USB Mic")
+        ptt = crear_ptt(language="es")
+        ptt.on_press(L)
+        assert config.load_state_device() == "USB Mic" and config.load_state_language() == "en"
+
+    def test_cambio_de_micro_conserva_idioma(self, crear_ptt):
+        ptt = crear_ptt(device=1, language="es")
+        ptt.on_press(L)
+        ptt.on_press(F)
+        assert config.load_state_device() == "USB Mic" and config.load_state_language() == "en"
+
+    def test_cambio_con_el_modelo_descargado(self, crear_ptt):
+        ptt = crear_ptt(transcriber=None, language="es")
+        ptt.on_press(L)
+        assert ptt.language == "en" and ptt.transcriber is None
+
+    def test_tras_cerrar_se_ignora(self, crear_ptt):
+        ptt = crear_ptt(language="es")
+        ptt.begin_shutdown()
+        ptt.on_press(L)
+        assert ptt.language == "es"
+
+    def test_las_teclas_de_idioma_no_graban(self, crear_ptt):
+        ptt = crear_ptt()
+        ptt.on_press(L)
+        ptt.on_press(A)
+        assert ptt.state is State.IDLE and ptt.recorder.inicios == 0
 
 
 class TestDictation:
