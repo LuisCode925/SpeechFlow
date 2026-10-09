@@ -122,6 +122,23 @@ class TestLoadConfig:
         with pytest.raises(ConfigError, match=f"keys.{clave} debe ser str, no int"):
             config.load_config(escribir(tmp_path, f"[keys]\n{clave} = 1\n"))
 
+    def test_mode_defecto_hold(self, tmp_path):
+        assert config.load_config(escribir(tmp_path, "")).mode == "hold"
+
+    @pytest.mark.parametrize("valor", ["hold", "toggle"])
+    def test_mode_valido(self, tmp_path, valor):
+        assert config.load_config(escribir(tmp_path, f'[recording]\nmode = "{valor}"\n')).mode == valor
+
+    @pytest.mark.parametrize("valor", ["pulsar", "Toggle", ""])
+    def test_mode_valor_invalido(self, tmp_path, valor):
+        with pytest.raises(ConfigError, match="recording.mode debe ser"):
+            config.load_config(escribir(tmp_path, f'[recording]\nmode = "{valor}"\n'))
+
+    @pytest.mark.parametrize("valor", ["true", "1"])
+    def test_mode_tipo_invalido(self, tmp_path, valor):
+        with pytest.raises(ConfigError, match="recording.mode debe ser str"):
+            config.load_config(escribir(tmp_path, f"[recording]\nmode = {valor}\n"))
+
     def test_archivo_inexistente(self, tmp_path):
         with pytest.raises(ConfigError, match="no se puede leer"):
             config.load_config(tmp_path / "no.toml")

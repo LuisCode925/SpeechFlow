@@ -26,6 +26,10 @@ class Config:
     vad: bool = True  # [model] vad; filtra silencios con Silero antes de transcribir
     language_key: str = "f7"  # [keys] language; alterna es <-> en
     auto_key: str = "f6"  # [keys] auto; activa o desactiva la detección automática de idioma
+    mode: str = "hold"  # [recording] mode; "hold" (mantener) o "toggle" (pulsar y pulsar)
+
+
+RECORDING_MODES = ("hold", "toggle")
 
 
 class ConfigError(Exception):
@@ -47,7 +51,11 @@ _SCHEMA: dict[str, dict[str, tuple[tuple[type, ...], str]]] = {
         "auto": ((str,), "auto_key"),
     },
     "audio": {"device": ((int, str), "device"), "watch_interval": ((int, float), "watch_interval")},
-    "recording": {"min_seconds": ((int, float), "min_seconds"), "max_seconds": ((int, float), "max_seconds")},
+    "recording": {
+        "min_seconds": ((int, float), "min_seconds"),
+        "max_seconds": ((int, float), "max_seconds"),
+        "mode": ((str,), "mode"),
+    },
     "notifications": {"enabled": ((bool,), "notifications")},
 }
 
@@ -128,6 +136,8 @@ def load_config(path: Path) -> Config:
         raise ConfigError(
             f"recording.max_seconds ({config.max_seconds}) debe ser mayor que min_seconds ({config.min_seconds})"
         )
+    if config.mode not in RECORDING_MODES:
+        raise ConfigError(f'recording.mode debe ser "hold" o "toggle", no {config.mode!r}')
     if config.watch_interval < 1.0:
         raise ConfigError(f"audio.watch_interval debe ser al menos 1.0, no {config.watch_interval}")
     if config.idle_timeout != 0 and config.idle_timeout < 30.0:
@@ -159,6 +169,7 @@ def _emergency_template() -> str:
         "[recording]\n"
         f"min_seconds = {d.min_seconds}\n"
         f"max_seconds = {d.max_seconds}\n"
+        f"mode = {json.dumps(d.mode)}  # \"hold\": graba mientras mantienes la tecla; \"toggle\": una pulsación empieza y otra para\n"
         "\n"
         "[notifications]\n"
         f"enabled = {str(d.notifications).lower()}\n"
