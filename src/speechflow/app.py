@@ -66,8 +66,10 @@ class PushToTalk:
         vad: bool = True,
         language_key: keyboard.Key | keyboard.KeyCode | None = None,
         auto_key: keyboard.Key | keyboard.KeyCode | None = None,
+        mode: str = "hold",
     ) -> None:
         self.key = key
+        self.mode = mode  # "hold" o "toggle"; se lee solo al arrancar
         self.switch_key = switch_key
         self.language_key = language_key  # None = sin tecla
         self.auto_key = auto_key
@@ -124,28 +126,35 @@ class PushToTalk:
             was_held, self._held = self._held, True
             if was_held or self.state is not State.IDLE:
                 return
-            if self._device_missing:
-                logger.warning(f"El micrófono seleccionado no está conectado ({self._watched_name}); reconéctalo o pulsa la tecla de cambio para elegir otro.")
-                return
-            try:
-                self.recorder.start()
-            except (sd.PortAudioError, ValueError) as error:
-                logger.error(f"Error al abrir el micrófono: {error}")
-                notify("SpeechFlow", f"Error al abrir el micrófono: {error}")
-                return
-            self.state = State.RECORDING
-            self._cancel_idle_timer()
-            reloading = self.transcriber is None and (self._loader is None or not self._loader.is_alive())
-            if reloading:
-                self._load_error = None
-                self._loader = threading.Thread(target=self._load_model, daemon=True)
-                self._loader.start()
-            self._timer = threading.Timer(self.max_seconds, self._stop_recording, args=(True,))
-            self._timer.daemon = True
-            self._timer.start()
+            reloading = self._begin_recording()
+        if reloading is None:
+            return
         logger.info("Grabando...")
         if reloading:
             logger.info(f"Modelo descargado: se carga {self.model_name} mientras grabas.")
+
+    def _begin_recording(self) -> bool | None:
+        """Abre el micrófono y pasa a RECORDING; con `_lock` tomado y en IDLE. None si no empieza; si no, si recarga el modelo."""
+        if self._device_missing:
+            logger.warning(f"El micrófono seleccionado no está conectado ({self._watched_name}); reconéctalo o pulsa la tecla de cambio para elegir otro.")
+            return None
+        try:
+            self.recorder.start()
+        except (sd.PortAudioError, ValueError) as error:
+            logger.error(f"Error al abrir el micrófono: {error}")
+            notify("SpeechFlow", f"Error al abrir el micrófono: {error}")
+            return None
+        self.state = State.RECORDING
+        self._cancel_idle_timer()
+        reloading = self.transcriber is None and (self._loader is None or not self._loader.is_alive())
+        if reloading:
+            self._load_error = None
+            self._loader = threading.Thread(target=self._load_model, daemon=True)
+            self._loader.start()
+        self._timer = threading.Timer(self.max_seconds, self._stop_recording, args=(True,))
+        self._timer.daemon = True
+        self._timer.start()
+        return reloading
 
     def on_release(self, key) -> None:
         if self._closing:
