@@ -25,6 +25,40 @@ def esperar_idle(ptt):
     esperar(lambda: ptt.state is State.IDLE)
 
 
+class TestIdioma:
+    def test_pasa_el_idioma_vigente_a_transcribe(self, crear_ptt, dobles, caplog):
+        transcriber = TranscriberFalso()
+        ptt = crear_ptt(transcriber=transcriber)
+        ptt.language = "en"
+        ptt.on_press(R)
+        ptt.on_release(R)
+        assert dobles.insertado.wait(2)
+        esperar_idle(ptt)
+        assert transcriber.idiomas == ["en"]
+        log = mensajes(caplog)
+        assert "Grabación terminada: 1.00 s. Transcribiendo con medium/en..." in log
+        assert any("caracteres, medium/en):" in m for m in log)
+
+    @pytest.mark.parametrize("detectado", ["es", "en"])
+    def test_en_auto_el_log_muestra_el_idioma_detectado(self, crear_ptt, dobles, caplog, detectado):
+        transcriber = TranscriberFalso(detectado=detectado)
+        ptt = crear_ptt(transcriber=transcriber, language="auto")
+        ptt.on_press(R)
+        ptt.on_release(R)
+        assert dobles.insertado.wait(2)
+        esperar_idle(ptt)
+        assert transcriber.idiomas == ["auto"]
+        assert "Transcribiendo con medium/auto..." in " ".join(mensajes(caplog))
+        assert any(f"caracteres, medium/auto→{detectado}):" in m for m in mensajes(caplog))
+
+    def test_en_auto_sin_texto_muestra_el_idioma_detectado(self, crear_ptt, dobles, caplog):
+        ptt = crear_ptt(transcriber=TranscriberFalso(texto="", detectado="en"), language="auto")
+        ptt.on_press(R)
+        ptt.on_release(R)
+        esperar_idle(ptt)
+        assert "Sin texto reconocido (0.10 s, medium/auto→en)." in mensajes(caplog)
+
+
 class TestDictation:
     def test_pulsar_y_soltar_inserta_el_texto(self, crear_ptt, dobles, caplog):
         """Pulsar graba, soltar transcribe e inserta el texto."""
@@ -401,6 +435,25 @@ class TestIdleAndReload:
         assert dobles.textos == ["hola mundo"] and carga.llamadas == [("medium", "es", True)]
         esperar_idle(ptt)
         assert ptt.transcriber is carga.creados[0]
+
+    def test_recarga_usa_el_idioma_vigente(self, crear_ptt, carga, dobles):
+        carga.puerta.set()
+        ptt = crear_ptt(transcriber=None)
+        ptt.language = "en"
+        ptt.on_press(R)
+        ptt.on_release(R)
+        assert dobles.insertado.wait(2)
+        assert carga.llamadas == [("medium", "en", True)]
+        esperar_idle(ptt)
+
+    def test_recarga_en_auto_pasa_auto(self, crear_ptt, carga, dobles):
+        carga.puerta.set()
+        ptt = crear_ptt(transcriber=None, language="auto")
+        ptt.on_press(R)
+        ptt.on_release(R)
+        assert dobles.insertado.wait(2)
+        assert carga.llamadas == [("medium", "auto", True)]
+        esperar_idle(ptt)
 
     def test_recarga_conserva_el_ajuste_vad(self, crear_ptt, carga, dobles):
         carga.puerta.set()

@@ -36,7 +36,7 @@ from speechflow.config import Config, ConfigError, find_config, load_config, loa
 from speechflow.inserter import insert_text
 from speechflow.log import LOGGER_NAME, log_banner, setup_logging
 from speechflow.notifier import notify, set_enabled
-from speechflow.transcriber import COMPUTE_TYPE, SAMPLE_RATE, Transcriber
+from speechflow.transcriber import AUTO_LANGUAGE, COMPUTE_TYPE, SAMPLE_RATE, Transcriber
 
 logger = logging.getLogger(LOGGER_NAME)
 
@@ -68,7 +68,7 @@ class PushToTalk:
         self.key = key
         self.switch_key = switch_key
         self.model_name = model_name
-        self.language = language  # para recargar; antes se leía de transcriber.language
+        self.language = language  # mutable: fuente de verdad del idioma, también para recargar
         self.min_seconds = min_seconds  # por debajo no se transcribe ni se escribe nada
         self.max_seconds = max_seconds  # la grabación se corta sola
         self.recorder = Recorder(device)
@@ -281,8 +281,10 @@ class PushToTalk:
                     return  # el finally devuelve el estado a IDLE; la siguiente pulsación reintenta
             with self._lock:
                 transcriber = self.transcriber
-            text, seconds = transcriber.transcribe(audio)
-            label = f"{self.model_name}/{self.language}"
+            language = self.language  # solo cambia en IDLE, así que no varía durante la transcripción
+            text, seconds = transcriber.transcribe(audio, language)
+            shown = f"auto→{transcriber.last_language}" if language == AUTO_LANGUAGE else language
+            label = f"{self.model_name}/{shown}"
             if not text:
                 logger.info(f"Sin texto reconocido ({seconds:.2f} s, {label}).")
                 return

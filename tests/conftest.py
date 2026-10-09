@@ -189,8 +189,11 @@ class TranscriberFalso:
 
     instancias: list["TranscriberFalso"] = []
 
-    def __init__(self, texto="hola mundo", bloquear=False):
+    def __init__(self, texto="hola mundo", bloquear=False, detectado="es"):
         self.texto = texto
+        self.detectado = detectado  # idioma que "detecta" en modo auto
+        self.idiomas = []  # `language` recibido en cada transcribe()
+        self.last_language = None
         self.error = None
         self.bloquear = bloquear
         self.entro = threading.Event()
@@ -199,8 +202,10 @@ class TranscriberFalso:
         self.cierres = 0
         TranscriberFalso.instancias.append(self)
 
-    def transcribe(self, audio):
+    def transcribe(self, audio, language=None):
         self.llamadas += 1
+        self.idiomas.append(language)
+        self.last_language = self.detectado if language == "auto" else language
         self.entro.set()
         if self.bloquear:
             self.liberar.wait(5)
@@ -247,7 +252,7 @@ def crear_ptt(dobles, caplog):
     creados = []
     caplog.set_level("INFO", logger="speechflow")
 
-    def fabrica(transcriber="auto", device=None, min_seconds=0.1, max_seconds=5.0, idle_timeout=0.0, vad=True):
+    def fabrica(transcriber="auto", device=None, min_seconds=0.1, max_seconds=5.0, idle_timeout=0.0, vad=True, language="es"):
         if transcriber == "auto":
             transcriber = TranscriberFalso()
         ptt = app.PushToTalk(
@@ -256,7 +261,7 @@ def crear_ptt(dobles, caplog):
             device,
             transcriber,
             "medium",
-            "es",
+            language,
             min_seconds,
             max_seconds,
             idle_timeout,
