@@ -186,6 +186,22 @@ class TestLoadConfig:
         with pytest.raises(ConfigError, match="model.vad debe ser bool"):
             config.load_config(escribir(tmp_path, f"[model]\nvad = {valor}\n"))
 
+    def test_punctuation_commands_defecto_true(self, tmp_path):
+        assert config.load_config(escribir(tmp_path, "")).punctuation_commands is True
+
+    def test_punctuation_commands_false(self, tmp_path):
+        c = config.load_config(escribir(tmp_path, "[text]\npunctuation_commands = false\n"))
+        assert c.punctuation_commands is False
+
+    @pytest.mark.parametrize("valor", ["1", '"si"'])
+    def test_punctuation_commands_tipo_invalido(self, tmp_path, valor):
+        with pytest.raises(ConfigError, match="text.punctuation_commands debe ser bool"):
+            config.load_config(escribir(tmp_path, f"[text]\npunctuation_commands = {valor}\n"))
+
+    def test_text_clave_desconocida(self, tmp_path):
+        with pytest.raises(ConfigError, match="clave desconocida text.foo"):
+            config.load_config(escribir(tmp_path, "[text]\nfoo = true\n"))
+
     @pytest.mark.parametrize(
         "texto, mensaje",
         [

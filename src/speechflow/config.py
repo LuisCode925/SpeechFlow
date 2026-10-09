@@ -27,6 +27,7 @@ class Config:
     language_key: str = "f7"  # [keys] language; alterna es <-> en
     auto_key: str = "f6"  # [keys] auto; activa o desactiva la detección automática de idioma
     mode: str = "hold"  # [recording] mode; "hold" (mantener) o "toggle" (pulsar y pulsar)
+    punctuation_commands: bool = True  # [text] punctuation_commands; sustituye "punto", "coma"... por su signo
 
 
 RECORDING_MODES = ("hold", "toggle")
@@ -57,6 +58,7 @@ _SCHEMA: dict[str, dict[str, tuple[tuple[type, ...], str]]] = {
         "mode": ((str,), "mode"),
     },
     "notifications": {"enabled": ((bool,), "notifications")},
+    "text": {"punctuation_commands": ((bool,), "punctuation_commands")},
 }
 
 
@@ -173,6 +175,9 @@ def _emergency_template() -> str:
         "\n"
         "[notifications]\n"
         f"enabled = {str(d.notifications).lower()}\n"
+        "\n"
+        "[text]\n"
+        f'punctuation_commands = {str(d.punctuation_commands).lower()}  # sustituye "punto", "coma", "nueva línea"... por su signo; false inserta lo que transcribe Whisper\n'
     )
 
 
