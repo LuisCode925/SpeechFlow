@@ -917,3 +917,19 @@ class TestShutdown:
         ptt = crear_ptt(transcriber=None)
         assert ptt.shutdown(1) is False
         assert ptt.transcriber is None
+
+
+class TestInsercionConfigurada:
+    def test_pasa_metodo_y_terminales_a_insert_text(self, crear_ptt, dobles):
+        ptt = crear_ptt(insert_method="type", terminal_classes=("myterm",))
+        ptt.on_press(R)
+        ptt.on_release(R)
+        assert dobles.insertado.wait(2)
+        assert dobles.opciones == [("type", ("myterm",))]
+
+    def test_defectos(self, crear_ptt, dobles):
+        ptt = crear_ptt()
+        ptt.on_press(R)
+        ptt.on_release(R)
+        assert dobles.insertado.wait(2)
+        assert dobles.opciones == [("clipboard", ())]

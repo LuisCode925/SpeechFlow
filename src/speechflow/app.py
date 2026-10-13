@@ -74,11 +74,15 @@ class PushToTalk:
         punctuation_commands: bool = False,
         compute_device: str = "auto",
         cpu_threads: int = 0,
+        insert_method: str = "clipboard",
+        terminal_classes: tuple[str, ...] = (),
     ) -> None:
         self.key = key
         self.compute_device = compute_device  # dispositivo ya resuelto en main(): una recarga no reintenta la GPU fallida
         self.cpu_threads = cpu_threads
         self.punctuation_commands = punctuation_commands  # se lee solo al arrancar
+        self.insert_method = insert_method  # "clipboard" o "type"; se lee solo al arrancar
+        self.terminal_classes = terminal_classes  # se suman a TERMINAL_CLASSES; se lee solo al arrancar
         self.mode = mode  # "hold" o "toggle"; se lee solo al arrancar
         self.switch_key = switch_key
         self.language_key = language_key  # None = sin tecla
@@ -382,7 +386,7 @@ class PushToTalk:
             original = text
             if self.punctuation_commands:
                 text = apply_voice_punctuation(text, transcriber.last_language)
-            insert_text(text)
+            insert_text(text, self.insert_method, self.terminal_classes)
             realtime = seconds / (len(audio) / SAMPLE_RATE)
             if text != original:
                 logger.info(f"Texto original: {original}")
@@ -612,6 +616,9 @@ def main() -> None:
     if shutil.which("xdotool") is None:
         logger.error("Falta xdotool. Instálalo con: sudo apt install xdotool")
         sys.exit(1)
+    if config.insert_method == "clipboard" and shutil.which("xclip") is None:
+        logger.error("Falta xclip. Instálalo con: sudo apt install xclip")
+        sys.exit(1)
     if os.environ.get("XDG_SESSION_TYPE", "x11") != "x11":
         logger.warning(f"Aviso: la sesión es {os.environ['XDG_SESSION_TYPE']!r}, no x11; la tecla global y xdotool pueden no funcionar.")
     set_enabled(config.notifications)
@@ -673,7 +680,7 @@ def main() -> None:
     logger.info(f"Cambio de idioma: tecla {config.language_key!r}; modo automático: tecla {config.auto_key!r}.")
     logger.info(ready_message(key_name, config.mode))
 
-    push_to_talk = PushToTalk(key, switch_key, device, transcriber, model_name, language, config.min_seconds, config.max_seconds, config.idle_timeout, config.vad, language_key, auto_key, config.mode, config.punctuation_commands, transcriber.device, config.cpu_threads)
+    push_to_talk = PushToTalk(key, switch_key, device, transcriber, model_name, language, config.min_seconds, config.max_seconds, config.idle_timeout, config.vad, language_key, auto_key, config.mode, config.punctuation_commands, transcriber.device, config.cpu_threads, config.insert_method, config.terminal_classes)
     push_to_talk.start_watcher(config.watch_interval)
     listener = keyboard.Listener(on_press=push_to_talk.on_press, on_release=push_to_talk.on_release)
     closing = threading.Event()  # la primera señal lo marca; una segunda fuerza la salida

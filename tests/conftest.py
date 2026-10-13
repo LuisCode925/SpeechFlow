@@ -225,11 +225,13 @@ def dobles(monkeypatch):
     registro = SimpleNamespace(
         notificaciones=[],
         textos=[],
+        opciones=[],  # (method, extra_terminals) de cada insert_text
         insertado=threading.Event(),
         error_insercion=None,
     )
 
-    def insert_text(texto):
+    def insert_text(texto, method="clipboard", extra_terminals=()):
+        registro.opciones.append((method, extra_terminals))
         if registro.error_insercion is not None:
             raise registro.error_insercion
         registro.textos.append(texto)
@@ -252,7 +254,7 @@ def crear_ptt(dobles, caplog):
     creados = []
     caplog.set_level("INFO", logger="speechflow")
 
-    def fabrica(transcriber="auto", device=None, min_seconds=0.1, max_seconds=5.0, idle_timeout=0.0, vad=True, language="es", mode="hold", punctuation_commands=False, compute_device="auto", cpu_threads=0):
+    def fabrica(transcriber="auto", device=None, min_seconds=0.1, max_seconds=5.0, idle_timeout=0.0, vad=True, language="es", mode="hold", punctuation_commands=False, compute_device="auto", cpu_threads=0, insert_method="clipboard", terminal_classes=()):
         if transcriber == "auto":
             transcriber = TranscriberFalso()
         ptt = app.PushToTalk(
@@ -272,6 +274,8 @@ def crear_ptt(dobles, caplog):
             punctuation_commands,
             compute_device,
             cpu_threads,
+            insert_method,
+            terminal_classes,
         )
         creados.append(ptt)
         return ptt

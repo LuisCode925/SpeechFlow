@@ -249,14 +249,14 @@ class TestMainDispositivo:
         with pytest.raises(Parada):
             app.main()
         assert llamadas[0][3:] == ("cpu", 3)
-        assert llamadas[1][1][-2:] == ("cpu", 3)
+        assert llamadas[1][1][14:16] == ("cpu", 3)
 
     def test_push_to_talk_recibe_el_dispositivo_resuelto_no_auto(self, monkeypatch):
         t = type("T", (), {"device": "cpu", "model_name": "small"})()
         llamadas, Parada = ejecutar_main(monkeypatch, [], t, config=Config(cpu_threads=2))
         with pytest.raises(Parada):
             app.main()
-        assert llamadas[0][3] == "auto" and llamadas[1][1][-2:] == ("cpu", 2)
+        assert llamadas[0][3] == "auto" and llamadas[1][1][14:16] == ("cpu", 2)
 
     def test_sin_cli_usa_config(self, monkeypatch):
         t = type("T", (), {"device": "cuda", "model_name": "medium"})()
@@ -420,3 +420,43 @@ class TestResolveConfig:
         with caplog.at_level("INFO", logger="speechflow"):
             assert app.resolve_config(None) == Config()
         assert "no se pudo crear la plantilla de emergencia: denegado." in caplog.records[0].getMessage()
+
+
+class TestMainInsercion:
+    def correr(self, monkeypatch, config=None, sin=()):
+        t = type("T", (), {"device": "cpu", "model_name": "small"})()
+        llamadas, Parada = ejecutar_main(monkeypatch, [], t, config=config)
+        monkeypatch.setattr(app.shutil, "which", lambda name: None if name in sin else "/usr/bin/" + name)
+        return llamadas, Parada
+
+    def test_push_to_talk_recibe_la_configuracion(self, monkeypatch):
+        llamadas, Parada = self.correr(monkeypatch, Config(insert_method="type", terminal_classes=("myterm",)))
+        with pytest.raises(Parada):
+            app.main()
+        assert llamadas[1][1][16:18] == ("type", ("myterm",))
+
+    def test_defectos_llegan_a_push_to_talk(self, monkeypatch):
+        llamadas, Parada = self.correr(monkeypatch)
+        with pytest.raises(Parada):
+            app.main()
+        assert llamadas[1][1][16:18] == ("clipboard", ())
+
+    def test_sin_xclip_y_clipboard_sale_con_1(self, monkeypatch, caplog):
+        llamadas, _ = self.correr(monkeypatch, Config(insert_method="clipboard"), sin=("xclip",))
+        with pytest.raises(SystemExit) as salida:
+            app.main()
+        assert salida.value.code == 1
+        assert "Falta xclip. Instálalo con: sudo apt install xclip" in caplog.text
+        assert not any(l[0] == "PushToTalk" for l in llamadas)
+
+    def test_sin_xclip_y_type_arranca(self, monkeypatch, caplog):
+        _, Parada = self.correr(monkeypatch, Config(insert_method="type"), sin=("xclip",))
+        with pytest.raises(Parada):
+            app.main()
+        assert "Falta xclip" not in caplog.text
+
+    def test_xdotool_se_comprueba_antes_que_xclip(self, monkeypatch, caplog):
+        self.correr(monkeypatch, sin=("xdotool", "xclip"))
+        with pytest.raises(SystemExit):
+            app.main()
+        assert "Falta xdotool" in caplog.text and "Falta xclip" not in caplog.text
