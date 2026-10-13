@@ -30,3 +30,7 @@
 
 [text]
 # punctuation_commands = true   # sustituye "punto", "coma", "nueva línea"... por su signo (es/en) y pone mayúscula inicial; false inserta lo que transcribe Whisper
+
+[log]
+# level = "info"         # nivel de la consola: "debug", "info", "warning" o "error"; --quiet, --verbose y --log-level ganan
+# file_level = "info"    # nivel del archivo speechflow.log: mismos valores; las opciones de CLI no lo cambian

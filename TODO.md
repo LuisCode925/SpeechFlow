@@ -22,7 +22,7 @@ Alto valor, esfuerzo bajo:
 
 - [x] ~~1. VAD (`vad_filter` de `faster-whisper`, Silero) y recorte de silencios: menos alucinaciones en silencio y transcripción más rápida.~~ (SPEC 18, `[model] vad`)
 - [x] ~~2. Cambio de idioma en caliente (es/en) con tecla nueva en `[keys]`, y detección automática de idioma como modo opcional.~~ (SPEC 19, `[keys] language` y `[keys] auto`)
-- [ ] 3. Opciones `--quiet` / `--verbose` y niveles de log configurables.
+- [x] ~~3. Opciones `--quiet` / `--verbose` y niveles de log configurables.~~ (SPEC 24, `[log] level`, `[log] file_level`)
 - [x] ~~4. Modo toggle (pulsar para empezar, pulsar para parar), para dictados largos.~~ (SPEC 20, `[recording] mode`)
 
 Valor medio:
@@ -83,7 +83,7 @@ Pueden esperar: soporte Wayland y reducción de ruido.
 ## Log y diagnóstico
 
 - [x] ~~Archivo de log, rotación y carpeta `logs/` (SPEC 07).~~ (SPEC 17, en `state_dir()` y sin carpeta `logs/`)
-- [ ] Opciones `--quiet` / `--verbose` y niveles configurables (SPEC 07).
+- [x] ~~Opciones `--quiet` / `--verbose` y niveles configurables (SPEC 07).~~ (SPEC 24)
 - [ ] Log en `capture_mic.py`, `benchmark_stt.py` y `audio.py` (SPEC 07).
 - [ ] Formato JSON, colores y zona horaria en el log (SPEC 07).
 - [ ] Mostrar VRAM, versión de CUDA, tecla y sesión X11 en el banner de arranque (SPEC 07).

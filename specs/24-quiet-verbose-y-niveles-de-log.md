@@ -1,6 +1,6 @@
 # SPEC 24 — Opciones `--quiet` / `--verbose` y niveles de log configurables
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 07, SPEC 09, SPEC 10, SPEC 16, SPEC 17
 > **Fecha:** 2026-10-12
 > **Objetivo:** Permitir elegir el nivel de log de la consola con `--quiet`, `--verbose` y `--log-level` (o `[log] level`) y el del archivo con `[log] file_level`, sin cambiar el comportamiento por defecto.

@@ -98,7 +98,7 @@ print(f"{seconds:.2f} s: {text}")
 - `src/speechflow/inserter.py`: `insert_text(text)` escribe el texto en la ventana con foco con `xdotool type --clearmodifiers`.
 - `src/speechflow/notifier.py`: `notify(title, body)` envía una notificación de escritorio con `notify-send`; si no está instalado o están desactivadas con `set_enabled(False)`, no hace nada.
 - `src/speechflow/config.py`: configuración de usuario de la app de push-to-talk (`Config`, `find_config()`, `load_config()`, `write_emergency()` y el estado del micrófono con `load_state_device()` / `save_state_device()`). Ver [Configuración](#configuración).
-- `src/speechflow/log.py`: `setup_logging()` configura el logger `speechflow` con el formato `AAAA-MM-DD HH:MM:SS.mmm NIVEL mensaje` (hora local). Las líneas `INFO` salen por stdout y las `WARNING` y `ERROR` por stderr. Es idempotente. Añade un tercer manejador, un `RotatingFileHandler` en `speechflow.log` (ver [Configuración](#configuración)): mismas líneas `INFO`, `WARNING` y `ERROR` y mismo formato que la consola, 1 MB por archivo y 3 copias (`speechflow.log.1` a `.3`, unos 4 MB como máximo), con permisos `0600` también tras rotar. Si el archivo no se puede abrir, registra `No se puede escribir el log en ...` y sigue solo con consola. `log_banner()` imprime por stdout, sin prefijo, el arte ASCII de SpeechFlow con su versión y la de `faster-whisper`; `app.py` lo muestra justo antes de `Cargando ...`, una vez superadas las validaciones de arranque. Por ahora solo lo usa `app.py`.
+- `src/speechflow/log.py`: `setup_logging(console_level)` configura el logger `speechflow` (en `DEBUG`; filtran los manejadores) con el formato `AAAA-MM-DD HH:MM:SS.mmm NIVEL mensaje` (hora local). Las líneas por debajo de `WARNING` salen por stdout y las `WARNING` y `ERROR` por stderr. Es idempotente. `apply_log_levels(consola, archivo)` reajusta los niveles de los manejadores una vez leída la configuración (ver [Niveles de log](#niveles-de-log)). Añade un tercer manejador, un `RotatingFileHandler` en `speechflow.log` (ver [Configuración](#configuración)): mismas líneas `INFO`, `WARNING` y `ERROR` y mismo formato que la consola, 1 MB por archivo y 3 copias (`speechflow.log.1` a `.3`, unos 4 MB como máximo), con permisos `0600` también tras rotar. Si el archivo no se puede abrir, registra `No se puede escribir el log en ...` y sigue solo con consola. `log_banner()` imprime por stdout, sin prefijo, el arte ASCII de SpeechFlow con su versión y la de `faster-whisper`; `app.py` lo muestra tras leer la configuración y antes de `Cargando ...`, salvo que el nivel de consola sea `warning` o `error`. Por ahora solo lo usa `app.py`.
 
 ## Push-to-talk
 
@@ -169,6 +169,9 @@ Opciones:
 | `--key` | Tecla de disparo: nombre de `pynput.keyboard.Key` (`ctrl_r`, `f9`, ...) o un carácter suelto. Falla con un mensaje claro si no existe. | `ctrl_r` |
 | `--switch-key` | Tecla de cambio de entrada de audio, mismo formato que `--key`. Debe ser distinta de `--key`; si no, el script sale con código 1. | `f8` |
 | `--compute-device` | Dispositivo de Whisper: `auto` (GPU si funciona, si no CPU), `cpu` o `cuda`. Gana sobre `[model] device`. Ver [Modo solo CPU](#modo-solo-cpu). | `auto` |
+| `--quiet` | Consola solo con `WARNING` y `ERROR` (equivale a `--log-level warning`). Omite el banner. No cambia el archivo de log ni las notificaciones. Excluyente con `--verbose` y `--log-level`. | — |
+| `--verbose` | Consola con mensajes `DEBUG` (equivale a `--log-level debug`). No cambia el archivo de log. Excluyente con `--quiet` y `--log-level`. | — |
+| `--log-level` | Nivel de la consola: `debug`, `info`, `warning` o `error`. Gana sobre `[log] level`. Ver [Niveles de log](#niveles-de-log). | `info` |
 | `--config` | Archivo de configuración TOML. Si no existe, el script sale con código 1. | `$XDG_CONFIG_HOME/speechflow/config.toml` (`~/.config/speechflow/config.toml`) |
 
 Un argumento escrito en la línea de comandos gana sobre el archivo de configuración (ver [Configuración](#configuración)).
@@ -224,6 +227,29 @@ Ejemplo: dictar "hola coma mundo punto" inserta `Hola, mundo.`.
 ```
 2026-10-09 10:15:03.221 INFO    Texto original: hola coma mundo punto
 2026-10-09 10:15:03.222 INFO    Insertado (0.42 s, 0.12x tiempo real, 12 caracteres, medium/es): Hola, mundo.
+```
+
+## Niveles de log
+
+El nivel de la consola se elige con `--quiet`, `--verbose` o `--log-level` (excluyentes entre sí) y, si no se da ninguno, con `[log] level` (defecto `info`). El nivel del archivo `speechflow.log` solo se elige con `[log] file_level` (defecto `info`); las opciones de CLI no lo tocan, así que `--quiet` deja el archivo registrando igual que siempre.
+
+| Nivel de consola | Se muestra | Banner |
+| ---------------- | ---------- | ------ |
+| `debug` | `DEBUG`, `INFO`, `WARNING` y `ERROR` | sí |
+| `info` (defecto) | `INFO`, `WARNING` y `ERROR` | sí |
+| `warning` | `WARNING` y `ERROR` | no |
+| `error` | solo `ERROR` | no |
+
+- **Orden de arranque:** el logger se crea con el nivel de la CLI (o `info`), se lee la configuración y entonces se aplican los niveles definitivos. Por eso las líneas de `resolve_config` (`Configuración: ...`) respetan la CLI pero no `[log] level`. El banner se imprime después de leer la configuración, así que `Configuración: ...` queda por encima de él.
+- **`DEBUG`:** por ahora solo existe la línea `Niveles de log: consola=..., archivo=...`, que sale con consola en `debug` y llega al archivo si `file_level = "debug"`.
+- **Notificaciones:** no dependen del nivel de log.
+- **Privacidad:** con `file_level = "warning"` o `"error"` el archivo no guarda el texto dictado (`Insertado (...)`).
+- Los niveles se leen solo al arrancar; cambiarlos exige reiniciar. Valores válidos en minúsculas.
+
+```bash
+speechflow --quiet                # consola solo con avisos y errores
+speechflow --verbose              # consola con DEBUG
+speechflow --log-level error
 ```
 
 ## Modo solo CPU
@@ -303,11 +329,15 @@ enabled = true
 
 [text]
 punctuation_commands = true # sustituye "punto", "coma", "nueva línea"... por su signo; false inserta lo que transcribe Whisper
+
+[log]
+level = "info"              # nivel de la consola: "debug", "info", "warning" o "error"; --quiet, --verbose y --log-level ganan
+file_level = "info"         # nivel del archivo speechflow.log; las opciones de CLI no lo cambian
 ```
 
 **Precedencia por valor:** argumento de CLI (solo si se escribió) > estado guardado (solo dispositivo e idioma) > archivo > defectos. En concreto, el dispositivo es `--device` > `state.toml` > `[audio] device` > el que contenga "Realtek", si no el del sistema, y el idioma es `--language` > `state.toml` > `[model] language` > `es`.
 
-**Validación:** una clave o sección desconocida, un tipo incorrecto, `min_seconds <= 0` o `max_seconds <= min_seconds` o `watch_interval < 1.0`, un `idle_timeout` distinto de 0 y menor que 30.0, un `device` que no sea `"auto"`, `"cpu"` ni `"cuda"` (el error nombra `model.device`), un `cpu_threads` negativo (nombra `model.cpu_threads`), un `mode` que no sea `"hold"` ni `"toggle"`, o un `punctuation_commands` que no sea `true` ni `false` (por ejemplo `"si"`) hacen inválido el archivo. Las teclas se siguen validando al arrancar con mensajes `ERROR` que nombran la clave (`--key`, `--switch-key`, `[keys] language`, `[keys] auto`); si dos de las cuatro coinciden, el script sale con código 1 y nombra las dos.
+**Validación:** una clave o sección desconocida, un tipo incorrecto, `min_seconds <= 0` o `max_seconds <= min_seconds` o `watch_interval < 1.0`, un `idle_timeout` distinto de 0 y menor que 30.0, un `device` que no sea `"auto"`, `"cpu"` ni `"cuda"` (el error nombra `model.device`), un `cpu_threads` negativo (nombra `model.cpu_threads`), un `mode` que no sea `"hold"` ni `"toggle"`, un `punctuation_commands` que no sea `true` ni `false` (por ejemplo `"si"`), o un `[log] level` o `[log] file_level` que no sea `"debug"`, `"info"`, `"warning"` ni `"error"` (el error nombra `log.level` o `log.file_level`) hacen inválido el archivo. Las teclas se siguen validando al arrancar con mensajes `ERROR` que nombran la clave (`--key`, `--switch-key`, `[keys] language`, `[keys] auto`); si dos de las cuatro coinciden, el script sale con código 1 y nombra las dos.
 
 **Archivo de emergencia:** si no se encuentra ningún archivo, o el encontrado no se puede leer o no es válido, el script registra un `WARNING` con la causa, crea `config.emergency.toml` junto al archivo de configuración con todos los valores por defecto (sin sobrescribirlo si ya existe) y sigue con los defectos. El archivo inválido del usuario no se toca. La plantilla de emergencia no se lee nunca: cópiala o renómbrala a `config.toml` para usarla.
 
