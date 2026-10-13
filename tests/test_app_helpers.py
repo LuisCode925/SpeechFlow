@@ -422,6 +422,31 @@ class TestResolveConfig:
         assert "no se pudo crear la plantilla de emergencia: denegado." in caplog.records[0].getMessage()
 
 
+class TestMainReemplazos:
+    def test_compila_y_pasa_las_reglas_y_el_prompt(self, monkeypatch):
+        t = type("T", (), {"device": "cpu", "model_name": "small"})()
+        cfg = Config(
+            initial_prompt="Kubernetes",
+            replacements=(("git ?hub", "GitHub"),),
+            replacements_by_language=(("es", (("cuber ?netis", "Kubernetes"),)),),
+        )
+        llamadas, Parada = ejecutar_main(monkeypatch, [], t, config=cfg)
+        with pytest.raises(Parada):
+            app.main()
+        argumentos = llamadas[1][1]
+        por_idioma, plano = argumentos[20]
+        assert argumentos[19] == "Kubernetes" and llamadas[0][5] == "Kubernetes"
+        assert [(p.pattern, r) for p, r in plano] == [("git ?hub", "GitHub")]
+        assert [(p.pattern, r) for p, r in por_idioma["es"]] == [("cuber ?netis", "Kubernetes")]
+
+    def test_defecto_sin_reglas(self, monkeypatch):
+        t = type("T", (), {"device": "cpu", "model_name": "small"})()
+        llamadas, Parada = ejecutar_main(monkeypatch, [], t)
+        with pytest.raises(Parada):
+            app.main()
+        assert llamadas[1][1][20] == ({}, ())
+
+
 class TestMainInsercion:
     def correr(self, monkeypatch, config=None, sin=()):
         t = type("T", (), {"device": "cpu", "model_name": "small"})()

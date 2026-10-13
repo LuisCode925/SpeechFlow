@@ -10,6 +10,7 @@ from pynput import keyboard
 
 from speechflow import app, config
 from speechflow.app import State
+from speechflow.replacements import compile_rules
 
 from conftest import TranscriberFalso, dispositivo, esperar
 
@@ -357,6 +358,62 @@ class TestPuntuacionPorVoz:
         esperar_idle(ptt)
         assert dobles.textos == []
         assert "Sin texto reconocido (0.10 s, medium/es)." in mensajes(caplog)
+
+
+class TestReemplazos:
+    def reglas(self, plano=(), por_idioma=None):
+        """Compila como main(): (dict idioma -> reglas, reglas planas)."""
+        return {l: compile_rules(p) for l, p in (por_idioma or {}).items()}, compile_rules(plano)
+
+    def dictar(self, ptt):
+        ptt.on_press(R)
+        ptt.on_release(R)
+        esperar_idle(ptt)
+
+    def test_se_aplican_tras_la_puntuacion(self, crear_ptt, dobles):
+        reglas = self.reglas([("^hola,", "Hello,")])  # solo casa si la puntuación ya se aplicó
+        ptt = crear_ptt(transcriber=TranscriberFalso(texto="hola coma mundo punto"), punctuation_commands=True, replacements=reglas)
+        self.dictar(ptt)
+        assert dobles.textos == ["Hello, mundo."]
+
+    def test_subtabla_del_idioma_antes_que_la_plana(self, crear_ptt, dobles):
+        reglas = self.reglas([("b", "c")], {"es": [("a", "b")], "en": [("a", "z")]})
+        ptt = crear_ptt(transcriber=TranscriberFalso(texto="a"), replacements=reglas)
+        self.dictar(ptt)
+        assert dobles.textos == ["c"]  # a -> b (es) -> c (plana); la de en no se aplica
+
+    def test_en_auto_usa_el_idioma_detectado(self, crear_ptt, dobles):
+        reglas = self.reglas([], {"es": [("a", "ES")], "en": [("a", "EN")]})
+        ptt = crear_ptt(transcriber=TranscriberFalso(texto="a", detectado="en"), language="auto", replacements=reglas)
+        self.dictar(ptt)
+        assert dobles.textos == ["EN"]
+
+    def test_idioma_sin_subtabla_solo_aplica_la_plana(self, crear_ptt, dobles):
+        reglas = self.reglas([("a", "P")], {"en": [("a", "EN")]})
+        ptt = crear_ptt(transcriber=TranscriberFalso(texto="a"), replacements=reglas)
+        self.dictar(ptt)
+        assert dobles.textos == ["P"]
+
+    def test_historial_guarda_final_y_original(self, crear_ptt, dobles, caplog):
+        history = HistoryFalso()
+        ptt = crear_ptt(transcriber=TranscriberFalso(texto="sube a git hub"), history=history, replacements=self.reglas([("git ?hub", "GitHub")]))
+        self.dictar(ptt)
+        assert (history.entradas[0]["text"], history.entradas[0]["original"]) == ("sube a GitHub", "sube a git hub")
+        assert "Texto original: sube a git hub" in mensajes(caplog)
+
+    def test_sin_reglas_nada_cambia(self, crear_ptt, dobles, caplog):
+        ptt = crear_ptt(transcriber=TranscriberFalso(texto="sube a git hub"))
+        self.dictar(ptt)
+        assert dobles.textos == ["sube a git hub"]
+        assert not any(m.startswith("Texto original") for m in mensajes(caplog))
+
+    def test_texto_vacio_tras_reemplazar_no_inserta_ni_guarda(self, crear_ptt, dobles, caplog):
+        history = HistoryFalso()
+        ptt = crear_ptt(transcriber=TranscriberFalso(texto="eh eh"), history=history, replacements=self.reglas([("eh+", "")]))
+        self.dictar(ptt)
+        assert dobles.textos == [] and history.entradas == []
+        assert "Sin texto tras los reemplazos (0.10 s, medium/es)." in mensajes(caplog)
+        assert not any(m.startswith("Insertado") for m in mensajes(caplog))
 
 
 class TestModoToggle:

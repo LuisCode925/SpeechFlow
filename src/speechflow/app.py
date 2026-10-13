@@ -42,6 +42,7 @@ from speechflow.inserter import insert_text
 from speechflow.log import LOGGER_NAME, apply_log_levels, log_banner, setup_logging
 from speechflow.notifier import notify, set_enabled
 from speechflow.punctuation import apply_voice_punctuation
+from speechflow.replacements import Rule, apply_replacements, compile_rules
 from speechflow.transcriber import AUTO_LANGUAGE, COMPUTE_TYPE, DEFAULT_CPU_MODEL, DEFAULT_LANGUAGE, DEFAULT_MODEL, SAMPLE_RATE, Transcriber
 
 logger = logging.getLogger(LOGGER_NAME)
@@ -80,8 +81,10 @@ class PushToTalk:
         terminal_classes: tuple[str, ...] = (),
         history: History | None = None,
         initial_prompt: str = "",
+        replacements: tuple[dict[str, tuple[Rule, ...]], tuple[Rule, ...]] = ({}, ()),
     ) -> None:
         self.key = key
+        self.replacements_by_language, self.replacements = replacements  # reglas por idioma y planas; se leen solo al arrancar
         self.initial_prompt = initial_prompt  # para recargar el modelo con el mismo prompt; se lee solo al arrancar
         self.compute_device = compute_device  # dispositivo ya resuelto en main(): una recarga no reintenta la GPU fallida
         self.cpu_threads = cpu_threads
@@ -393,6 +396,11 @@ class PushToTalk:
             original = text
             if self.punctuation_commands:
                 text = apply_voice_punctuation(text, transcriber.last_language)
+            rules = self.replacements_by_language.get(transcriber.last_language, ()) + self.replacements
+            text = apply_replacements(text, rules)
+            if not text:
+                logger.info(f"Sin texto tras los reemplazos ({seconds:.2f} s, {label}).")
+                return
             self._save_history(text, original, transcriber.last_language, len(audio) / SAMPLE_RATE, seconds)
             insert_text(text, self.insert_method, self.terminal_classes)
             realtime = seconds / (len(audio) / SAMPLE_RATE)
@@ -721,7 +729,13 @@ def main() -> None:
                 f"No se puede escribir el historial en {path if path is not None else '(ruta desconocida)'}: {error}. Se sigue sin historial."
             )
 
-    push_to_talk = PushToTalk(key, switch_key, device, transcriber, model_name, language, config.min_seconds, config.max_seconds, config.idle_timeout, config.vad, language_key, auto_key, config.mode, config.punctuation_commands, transcriber.device, config.cpu_threads, config.insert_method, config.terminal_classes, history, config.initial_prompt)
+    try:
+        flat = compile_rules(config.replacements)
+        by_language = {lang: compile_rules(pairs) for lang, pairs in config.replacements_by_language}
+    except ValueError as error:  # load_config ya las validó; solo si Config se construye a mano
+        logger.error(f"Reemplazos inválidos: {error}")
+        sys.exit(1)
+    push_to_talk = PushToTalk(key, switch_key, device, transcriber, model_name, language, config.min_seconds, config.max_seconds, config.idle_timeout, config.vad, language_key, auto_key, config.mode, config.punctuation_commands, transcriber.device, config.cpu_threads, config.insert_method, config.terminal_classes, history, config.initial_prompt, (by_language, flat))
     push_to_talk.start_watcher(config.watch_interval)
     listener = keyboard.Listener(on_press=push_to_talk.on_press, on_release=push_to_talk.on_release)
     closing = threading.Event()  # la primera señal lo marca; una segunda fuerza la salida
