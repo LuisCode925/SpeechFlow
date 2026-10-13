@@ -34,7 +34,7 @@ Valor medio:
 
 Base para la GUI:
 
-- [ ] 9. Daemon y servicio `systemd` de usuario (la GUI o bandeja será cliente del proceso).
+- [x] ~~9. Daemon y servicio `systemd` de usuario (la GUI o bandeja será cliente del proceso).~~ (SPEC 28, `speechflow service install`)
 - [ ] 10. Canal de control (socket Unix o señales): pausar, cambiar idioma o dispositivo, consultar estado. Es la dependencia real de la GUI.
 - [x] ~~11. Fallback a CPU si falla CUDA, para que el servicio no muera al arrancar.~~ (SPEC 22, `[model] device = "auto"`)
 
@@ -71,7 +71,7 @@ Pueden esperar: soporte Wayland y reducción de ruido.
 ## Ejecución en segundo plano
 
 - [ ] Bandeja del sistema (SPEC 01, 03, 04, 05).
-- [ ] Daemon, arranque automático y `systemd` (SPEC 03, 04, 05).
+- [x] ~~Daemon, arranque automático y `systemd` (SPEC 03, 04, 05).~~ (SPEC 28)
 - [x] ~~Descarga del modelo por inactividad y recarga bajo demanda (SPEC 06).~~ (SPEC 12)
 - [x] ~~Esperar a una transcripción en curso al salir (SPEC 06).~~ (SPEC 15)
 - [x] ~~Liberar el modelo en señales distintas de `Ctrl+C` (SPEC 06).~~ (SPEC 15)

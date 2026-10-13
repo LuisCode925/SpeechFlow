@@ -358,6 +358,26 @@ speechflow --compute-device cpu --model medium  # fuerza medium (lento)
 CUDA_VISIBLE_DEVICES="" speechflow --compute-device cpu
 ```
 
+## Servicio de usuario
+
+`speechflow service` registra `speechflow` como servicio de `systemd --user`: arranca con la sesión gráfica, se reinicia si falla y su salida va a `journalctl`.
+
+```bash
+speechflow service install     # escribe la unidad, la habilita y la arranca
+speechflow service status      # equivale a systemctl --user status speechflow
+speechflow service uninstall   # desactiva, para y borra la unidad
+```
+
+- **Unidad:** `~/.config/systemd/user/speechflow.service` (respeta `XDG_CONFIG_HOME`). Usa el Python y el entorno conda desde los que ejecutaste `install`, por lo que el entorno no necesita estar activado en tiempo de ejecución. `LD_LIBRARY_PATH` apunta a `<entorno>/lib` para que se encuentren cuBLAS y cuDNN.
+- **Logs:** `journalctl --user -u speechflow` (añade `-f` para seguirlos). El log rotativo de archivo sigue escribiéndose igual.
+- **Control:** `systemctl --user stop|start|restart speechflow`. `Restart=on-failure` no reinicia tras una salida limpia (`stop`, cierre de sesión), pero sí tras un fallo; se detiene tras 5 fallos en 60 s.
+- **Idempotente:** volver a ejecutar `install` reescribe la unidad pero no reinicia un servicio activo; aplica los cambios con `systemctl --user restart speechflow`.
+- **Configuración:** el servicio no recibe opciones de la CLI (`--device`, `--model`...); configúralo con el TOML de la sección [Configuración](#configuración).
+- **Requisito de sesión gráfica:** el servicio cuelga de `graphical-session.target` (GNOME) porque necesita `DISPLAY`, `XAUTHORITY` y el micrófono de la sesión. Si faltan `DISPLAY` o `XAUTHORITY` en otra sesión: `systemctl --user import-environment DISPLAY XAUTHORITY`. No arranca sin sesión (no usa `loginctl enable-linger`).
+- **No ejecutes dos instancias:** una a mano y la del servicio capturarían la misma tecla y dictarían dos veces. Para usar `speechflow` en la terminal, para antes el servicio con `systemctl --user stop speechflow`.
+- **Entorno movido o borrado:** si cambias de sitio o borras el entorno conda, la unidad queda apuntando a una ruta inexistente; vuelve a ejecutar `speechflow service install` desde el entorno nuevo.
+- **Requisitos del servicio:** `install` falla con código 1 si falta `systemctl` o si la ruta del Python o del entorno contiene espacios o `%`.
+
 ## Configuración
 
 La app de push-to-talk lee un archivo TOML opcional (solo ella; `capture_mic.py`, `benchmark_stt.py` y `--list-devices` no lo usan). Se usa el primero que exista, sin fusionar:

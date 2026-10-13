@@ -1,6 +1,6 @@
 # SPEC 28 — Servicio `systemd` de usuario
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 14, SPEC 15, SPEC 17, SPEC 22
 > **Fecha:** 2026-10-13
 > **Objetivo:** Añadir el subcomando `speechflow service install|uninstall|status` que registra `speechflow` como servicio de `systemd --user`, arrancado con la sesión gráfica, reiniciado si falla y con su salida en `journalctl --user`.
