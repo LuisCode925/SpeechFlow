@@ -98,6 +98,7 @@ print(f"{seconds:.2f} s: {text}")
 - `src/speechflow/inserter.py`: `insert_text(text, method, extra_terminals)` inserta el texto en la ventana con foco. Con `method="clipboard"` (el defecto) lo copia al portapapeles con `xclip`, lo pega con `xdotool key` (`Ctrl+V`, o `Ctrl+Shift+V` si la ventana es una terminal) y restaura el texto previo del portapapeles; si `xclip` o `xdotool` fallan, registra un `WARNING` y teclea con `xdotool type --clearmodifiers`, que es también el comportamiento de `method="type"`.
 - `src/speechflow/notifier.py`: `notify(title, body)` envía una notificación de escritorio con `notify-send`; si no está instalado o están desactivadas con `set_enabled(False)`, no hace nada.
 - `src/speechflow/config.py`: configuración de usuario de la app de push-to-talk (`Config`, `find_config()`, `load_config()`, `write_emergency()` y el estado del micrófono con `load_state_device()` / `save_state_device()`). Ver [Configuración](#configuración).
+- `src/speechflow/history.py`: `History(path, max_bytes, backup_count)` escribe una línea JSON por dictado con `add(entry)` (rotación por tamaño, permisos `0600`, un hilo a la vez) y se cierra con `close()`. Ver [Historial de transcripciones](#historial-de-transcripciones).
 - `src/speechflow/log.py`: `setup_logging(console_level)` configura el logger `speechflow` (en `DEBUG`; filtran los manejadores) con el formato `AAAA-MM-DD HH:MM:SS.mmm NIVEL mensaje` (hora local). Las líneas por debajo de `WARNING` salen por stdout y las `WARNING` y `ERROR` por stderr. Es idempotente. `apply_log_levels(consola, archivo)` reajusta los niveles de los manejadores una vez leída la configuración (ver [Niveles de log](#niveles-de-log)). Añade un tercer manejador, un `RotatingFileHandler` en `speechflow.log` (ver [Configuración](#configuración)): mismas líneas `INFO`, `WARNING` y `ERROR` y mismo formato que la consola, 1 MB por archivo y 3 copias (`speechflow.log.1` a `.3`, unos 4 MB como máximo), con permisos `0600` también tras rotar. Si el archivo no se puede abrir, registra `No se puede escribir el log en ...` y sigue solo con consola. `log_banner()` imprime por stdout, sin prefijo, el arte ASCII de SpeechFlow con su versión y la de `faster-whisper`; `app.py` lo muestra tras leer la configuración y antes de `Cargando ...`, salvo que el nivel de consola sea `warning` o `error`. Por ahora solo lo usa `app.py`.
 
 ## Push-to-talk
@@ -258,6 +259,37 @@ speechflow --verbose              # consola con DEBUG
 speechflow --log-level error
 ```
 
+## Historial de transcripciones
+
+Cada dictado con texto se guarda como una línea JSON en `$XDG_STATE_HOME/speechflow/history.jsonl` (defecto `~/.local/state/speechflow/history.jsonl`). Sirve para recuperar un dictado cuya inserción falló o cuya ventana cambió; la futura GUI lo leerá. Esta versión solo lo escribe: no hay subcomando para consultarlo.
+
+```json
+{"ts": "2026-10-13T10:42:07.318-05:00", "text": "Hola, mundo.", "original": "hola coma mundo punto", "language": "es", "model": "small", "audio_seconds": 2.4, "seconds": 0.61}
+```
+
+| Campo | Significado |
+| ----- | ----------- |
+| `ts` | Fecha y hora local, ISO 8601 con milisegundos y desfase. |
+| `text` | Texto final, tal como se entrega a la inserción (tras la puntuación por voz). |
+| `original` | Texto de Whisper antes de la puntuación por voz; igual a `text` si no hubo cambios o la función está apagada. |
+| `language` | Idioma usado; en modo automático, el detectado. |
+| `model` | Modelo cargado. |
+| `audio_seconds` | Duración del audio, con 2 decimales. |
+| `seconds` | Tiempo de transcripción, con 2 decimales. |
+
+- **Cuándo se guarda:** después de la puntuación por voz y **antes** de insertar, así que queda guardado aunque la inserción falle. No se guardan los dictados sin texto reconocido (`Sin texto reconocido`) ni las grabaciones descartadas. No se guarda el audio.
+- **Claves:** `[history] enabled` (`true` por defecto; `false` no crea ni escribe el archivo) y `[history] max_mb` (defecto `5`; mayor que 0). Se leen solo al arrancar.
+- **Rotación:** al superar `max_mb` el archivo activo pasa a `history.jsonl.1`; se conservan `history.jsonl.1` (el más reciente) y `history.jsonl.2` (el más antiguo), así que el total no pasa de unas 3 veces `max_mb`. Los tres archivos se crean con permisos `0600`.
+- **Fallos:** si el archivo no se puede abrir al arrancar, se registra `No se puede escribir el historial en <ruta>: <causa>. Se sigue sin historial.` y se dicta con normalidad. Si una escritura falla después, se registra una vez `No se pudo guardar el dictado en el historial: <causa>` (otra vez solo tras una escritura correcta) y el dictado se inserta igualmente.
+- **Privacidad:** el historial guarda **en claro todo lo que dictas**, incluidas contraseñas o datos privados, y no se cifra. Los permisos `0600` solo lo protegen de otros usuarios del equipo. Para no guardarlo, pon `[history] enabled = false`. Para borrarlo: `rm ~/.local/state/speechflow/history.jsonl*`.
+- **Consulta con `jq`:**
+
+```bash
+jq . ~/.local/state/speechflow/history.jsonl          # todas las entradas, legibles
+tail -n 1 ~/.local/state/speechflow/history.jsonl | jq -r .text   # el último dictado
+jq -r 'select(.language == "en") | .text' ~/.local/state/speechflow/history.jsonl*   # solo los dictados en inglés
+```
+
 ## Modo solo CPU
 
 Whisper puede ejecutarse sin GPU. La clave `[model] device` y la opción `--compute-device` (que gana sobre el TOML) aceptan:
@@ -299,8 +331,9 @@ Rutas de usuario (estándar XDG; una variable `XDG_*` vacía o con ruta relativa
 | Plantilla de emergencia | `$XDG_CONFIG_HOME/speechflow/config.emergency.toml` | `~/.config/speechflow/config.emergency.toml` |
 | Estado (lo escribe el script) | `$XDG_STATE_HOME/speechflow/state.toml` | `~/.local/state/speechflow/state.toml` |
 | Log (lo escribe el script) | `$XDG_STATE_HOME/speechflow/speechflow.log` | `~/.local/state/speechflow/speechflow.log` |
+| Historial (lo escribe el script) | `$XDG_STATE_HOME/speechflow/history.jsonl` | `~/.local/state/speechflow/history.jsonl` |
 
-Las carpetas se crean al escribir la plantilla, el estado o el log. Un `speechflow.toml`, `speechflow.emergency.toml` o `.speechflow-state.toml` en la raíz del repo (rutas anteriores) se ignora y **no se migra** ni se avisa de ello: muévelos a mano a las rutas nuevas (`speechflow.toml` → `config.toml`, `.speechflow-state.toml` → `state.toml`).
+Las carpetas se crean al escribir la plantilla, el estado, el log o el historial. Un `speechflow.toml`, `speechflow.emergency.toml` o `.speechflow-state.toml` en la raíz del repo (rutas anteriores) se ignora y **no se migra** ni se avisa de ello: muévelos a mano a las rutas nuevas (`speechflow.toml` → `config.toml`, `.speechflow-state.toml` → `state.toml`).
 
 **Log en archivo:** `speechflow.log` repite las líneas `INFO`, `WARNING` y `ERROR` de la consola (no el banner). Rota al llegar a 1 MB y conserva 3 copias (`speechflow.log.1` a `.3`), así que ocupa unos 4 MB como máximo. **Contiene el texto dictado** (`Insertado (...): {texto}`), por eso se crea con permisos `0600`. Para borrarlo: `rm ~/.local/state/speechflow/speechflow.log*`. Siempre está activo y no tiene opciones de configuración.
 
@@ -341,11 +374,15 @@ insert_method = "clipboard" # "clipboard": copia y pega con Ctrl+V (Ctrl+Shift+V
 [log]
 level = "info"              # nivel de la consola: "debug", "info", "warning" o "error"; --quiet, --verbose y --log-level ganan
 file_level = "info"         # nivel del archivo speechflow.log; las opciones de CLI no lo cambian
+
+[history]
+enabled = true              # guarda cada dictado en history.jsonl (texto en claro, permisos 0600); false no crea el archivo
+max_mb = 5.0                # tamaño máximo del archivo activo antes de rotar (se conservan 2 copias); mayor que 0
 ```
 
 **Precedencia por valor:** argumento de CLI (solo si se escribió) > estado guardado (solo dispositivo e idioma) > archivo > defectos. En concreto, el dispositivo es `--device` > `state.toml` > `[audio] device` > el que contenga "Realtek", si no el del sistema, y el idioma es `--language` > `state.toml` > `[model] language` > `es`.
 
-**Validación:** una clave o sección desconocida, un tipo incorrecto, `min_seconds <= 0` o `max_seconds <= min_seconds` o `watch_interval < 1.0`, un `idle_timeout` distinto de 0 y menor que 30.0, un `device` que no sea `"auto"`, `"cpu"` ni `"cuda"` (el error nombra `model.device`), un `cpu_threads` negativo (nombra `model.cpu_threads`), un `mode` que no sea `"hold"` ni `"toggle"`, un `punctuation_commands` que no sea `true` ni `false` (por ejemplo `"si"`), un `[text] insert_method` que no sea `"clipboard"` ni `"type"` (el error nombra `text.insert_method`), un `[text] terminal_classes` que no sea una lista de textos no vacíos (nombra `text.terminal_classes`), o un `[log] level` o `[log] file_level` que no sea `"debug"`, `"info"`, `"warning"` ni `"error"` (el error nombra `log.level` o `log.file_level`) hacen inválido el archivo. Las teclas se siguen validando al arrancar con mensajes `ERROR` que nombran la clave (`--key`, `--switch-key`, `[keys] language`, `[keys] auto`); si dos de las cuatro coinciden, el script sale con código 1 y nombra las dos.
+**Validación:** una clave o sección desconocida, un tipo incorrecto, `min_seconds <= 0` o `max_seconds <= min_seconds` o `watch_interval < 1.0`, un `idle_timeout` distinto de 0 y menor que 30.0, un `device` que no sea `"auto"`, `"cpu"` ni `"cuda"` (el error nombra `model.device`), un `cpu_threads` negativo (nombra `model.cpu_threads`), un `mode` que no sea `"hold"` ni `"toggle"`, un `punctuation_commands` que no sea `true` ni `false` (por ejemplo `"si"`), un `[text] insert_method` que no sea `"clipboard"` ni `"type"` (el error nombra `text.insert_method`), un `[text] terminal_classes` que no sea una lista de textos no vacíos (nombra `text.terminal_classes`), o un `[log] level` o `[log] file_level` que no sea `"debug"`, `"info"`, `"warning"` ni `"error"` (el error nombra `log.level` o `log.file_level`), un `[history] enabled` que no sea `true` ni `false` (nombra `history.enabled`), o un `[history] max_mb` que no sea un número o sea menor o igual que 0 (nombra `history.max_mb`) hacen inválido el archivo. Las teclas se siguen validando al arrancar con mensajes `ERROR` que nombran la clave (`--key`, `--switch-key`, `[keys] language`, `[keys] auto`); si dos de las cuatro coinciden, el script sale con código 1 y nombra las dos.
 
 **Archivo de emergencia:** si no se encuentra ningún archivo, o el encontrado no se puede leer o no es válido, el script registra un `WARNING` con la causa, crea `config.emergency.toml` junto al archivo de configuración con todos los valores por defecto (sin sobrescribirlo si ya existe) y sigue con los defectos. El archivo inválido del usuario no se toca. La plantilla de emergencia no se lee nunca: cópiala o renómbrala a `config.toml` para usarla.
 

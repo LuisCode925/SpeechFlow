@@ -1,6 +1,6 @@
 # SPEC 26 — Historial de transcripciones (JSONL)
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 10, SPEC 14, SPEC 16, SPEC 17, SPEC 21, SPEC 25
 > **Fecha:** 2026-10-13
 > **Objetivo:** Guardar cada dictado transcrito como una línea JSON en `history.jsonl` dentro de `state_dir()`, con rotación por tamaño, para poder recuperar un dictado perdido y como base de la futura GUI.

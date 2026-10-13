@@ -30,7 +30,7 @@ Valor medio:
 - [x] ~~5. Inserción por portapapeles (Ctrl+V), más robusta que `xdotool type` con acentos y caracteres raros; restaurar el portapapeles después.~~ (SPEC 25, `[text] insert_method`)
 - [ ] 6. Diccionario de reemplazos del usuario (`[replacements]` en TOML) e `initial_prompt` configurable para sesgar el vocabulario.
 - [x] ~~7. Comandos de voz de puntuación ("punto", "coma", "nueva línea").~~ (SPEC 21, `[text] punctuation_commands`)
-- [ ] 8. Historial de transcripciones (JSONL en `state_dir()`); la GUI lo necesitará y permite recuperar un dictado perdido.
+- [x] ~~8. Historial de transcripciones (JSONL en `state_dir()`); la GUI lo necesitará y permite recuperar un dictado perdido.~~ (SPEC 26, `[history]`)
 
 Base para la GUI:
 

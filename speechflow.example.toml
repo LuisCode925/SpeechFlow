@@ -36,3 +36,7 @@
 [log]
 # level = "info"         # nivel de la consola: "debug", "info", "warning" o "error"; --quiet, --verbose y --log-level ganan
 # file_level = "info"    # nivel del archivo speechflow.log: mismos valores; las opciones de CLI no lo cambian
+
+[history]
+# enabled = true         # guarda cada dictado en history.jsonl (texto en claro, permisos 0600); false no crea el archivo
+# max_mb = 5             # tamaño máximo del archivo activo antes de rotar (se conservan 2 copias); mayor que 0
