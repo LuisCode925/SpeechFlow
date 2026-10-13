@@ -628,10 +628,11 @@ class TestSwitchAndWatch:
 @pytest.fixture
 def carga(monkeypatch):
     """Sustituye load_transcriber: bloquea en `puerta` y devuelve un TranscriberFalso o lanza `error`."""
-    estado = SimpleNamespace(puerta=threading.Event(), llamadas=[], error=None, creados=[])
+    estado = SimpleNamespace(puerta=threading.Event(), llamadas=[], dispositivos=[], error=None, creados=[])
 
-    def cargar(model, language, vad):
+    def cargar(model, language, vad, device="auto", cpu_threads=0):
         estado.llamadas.append((model, language, vad))
+        estado.dispositivos.append((device, cpu_threads))
         estado.puerta.wait(2)
         if estado.error is not None:
             raise estado.error
@@ -715,6 +716,15 @@ class TestIdleAndReload:
         ptt.on_release(R)
         assert dobles.insertado.wait(2)
         assert carga.llamadas == [("medium", "en", True)]
+        esperar_idle(ptt)
+
+    def test_recarga_usa_el_dispositivo_resuelto(self, crear_ptt, carga, dobles):
+        carga.puerta.set()
+        ptt = crear_ptt(transcriber=None, compute_device="cpu", cpu_threads=4)
+        ptt.on_press(R)
+        ptt.on_release(R)
+        assert dobles.insertado.wait(2)
+        assert carga.dispositivos == [("cpu", 4)]
         esperar_idle(ptt)
 
     def test_recarga_en_auto_pasa_auto(self, crear_ptt, carga, dobles):

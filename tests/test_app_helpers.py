@@ -170,7 +170,11 @@ def ejecutar_main(monkeypatch, argumentos, transcriber=None, error=None, config=
     monkeypatch.setattr(app.shutil, "which", lambda name: "/usr/bin/" + name)
     monkeypatch.setattr(app.sd, "query_devices", lambda *a, **k: {"name": "mic", "default_samplerate": 16000})
     monkeypatch.setattr(app, "describe_device", lambda device: "mic")
-    monkeypatch.setattr(app, "PushToTalk", lambda *a, **k: (_ for _ in ()).throw(Parada()))
+    def crear_ptt(*a, **k):
+        llamadas.append(("PushToTalk", a))
+        raise Parada()
+
+    monkeypatch.setattr(app, "PushToTalk", crear_ptt)
     monkeypatch.setattr("sys.argv", ["speechflow", "--device", "0", *argumentos])
     return llamadas, Parada
 
@@ -182,6 +186,14 @@ class TestMainDispositivo:
         with pytest.raises(Parada):
             app.main()
         assert llamadas[0][3:] == ("cpu", 3)
+        assert llamadas[1][1][-2:] == ("cpu", 3)
+
+    def test_push_to_talk_recibe_el_dispositivo_resuelto_no_auto(self, monkeypatch):
+        t = type("T", (), {"device": "cpu"})()
+        llamadas, Parada = ejecutar_main(monkeypatch, [], t, config=Config(cpu_threads=2))
+        with pytest.raises(Parada):
+            app.main()
+        assert llamadas[0][3] == "auto" and llamadas[1][1][-2:] == ("cpu", 2)
 
     def test_sin_cli_usa_config(self, monkeypatch):
         t = type("T", (), {"device": "cuda"})()

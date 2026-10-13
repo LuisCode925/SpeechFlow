@@ -72,8 +72,12 @@ class PushToTalk:
         auto_key: keyboard.Key | keyboard.KeyCode | None = None,
         mode: str = "hold",
         punctuation_commands: bool = False,
+        compute_device: str = "auto",
+        cpu_threads: int = 0,
     ) -> None:
         self.key = key
+        self.compute_device = compute_device  # dispositivo ya resuelto en main(): una recarga no reintenta la GPU fallida
+        self.cpu_threads = cpu_threads
         self.punctuation_commands = punctuation_commands  # se lee solo al arrancar
         self.mode = mode  # "hold" o "toggle"; se lee solo al arrancar
         self.switch_key = switch_key
@@ -342,7 +346,7 @@ class PushToTalk:
     def _load_model(self) -> None:
         """Cuerpo del hilo de recarga: carga el modelo fuera del lock y lo publica, o guarda el error."""
         try:
-            transcriber = load_transcriber(self.model_name, self.language, self.vad)
+            transcriber = load_transcriber(self.model_name, self.language, self.vad, self.compute_device, self.cpu_threads)
         except Exception as error:
             with self._lock:
                 self._load_error = error
@@ -648,7 +652,7 @@ def main() -> None:
     logger.info(f"Cambio de idioma: tecla {config.language_key!r}; modo automático: tecla {config.auto_key!r}.")
     logger.info(ready_message(key_name, config.mode))
 
-    push_to_talk = PushToTalk(key, switch_key, device, transcriber, model, language, config.min_seconds, config.max_seconds, config.idle_timeout, config.vad, language_key, auto_key, config.mode, config.punctuation_commands)
+    push_to_talk = PushToTalk(key, switch_key, device, transcriber, model, language, config.min_seconds, config.max_seconds, config.idle_timeout, config.vad, language_key, auto_key, config.mode, config.punctuation_commands, transcriber.device, config.cpu_threads)
     push_to_talk.start_watcher(config.watch_interval)
     listener = keyboard.Listener(on_press=push_to_talk.on_press, on_release=push_to_talk.on_release)
     closing = threading.Event()  # la primera señal lo marca; una segunda fuerza la salida
