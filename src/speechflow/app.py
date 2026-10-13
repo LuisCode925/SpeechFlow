@@ -79,8 +79,10 @@ class PushToTalk:
         insert_method: str = "clipboard",
         terminal_classes: tuple[str, ...] = (),
         history: History | None = None,
+        initial_prompt: str = "",
     ) -> None:
         self.key = key
+        self.initial_prompt = initial_prompt  # para recargar el modelo con el mismo prompt; se lee solo al arrancar
         self.compute_device = compute_device  # dispositivo ya resuelto en main(): una recarga no reintenta la GPU fallida
         self.cpu_threads = cpu_threads
         self.punctuation_commands = punctuation_commands  # se lee solo al arrancar
@@ -355,7 +357,7 @@ class PushToTalk:
     def _load_model(self) -> None:
         """Cuerpo del hilo de recarga: carga el modelo fuera del lock y lo publica, o guarda el error."""
         try:
-            transcriber = load_transcriber(self.model_name, self.language, self.vad, self.compute_device, self.cpu_threads)
+            transcriber = load_transcriber(self.model_name, self.language, self.vad, self.compute_device, self.cpu_threads, self.initial_prompt)
         except Exception as error:
             with self._lock:
                 self._load_error = error
@@ -547,7 +549,7 @@ def is_heavy_for_cpu(model: str) -> bool:
     return model.startswith(("medium", "large", "distil-large", "turbo"))
 
 
-def load_transcriber(model: str | None, language: str, vad: bool = True, device: str = "auto", cpu_threads: int = 0) -> Transcriber:
+def load_transcriber(model: str | None, language: str, vad: bool = True, device: str = "auto", cpu_threads: int = 0, initial_prompt: str = "") -> Transcriber:
     """Carga el modelo registrando `Cargando ...` y `Modelo cargado en ...`; no notifica.
 
     `model` None = sin fijar: lo resuelve Transcriber según el dispositivo.
@@ -562,7 +564,7 @@ def load_transcriber(model: str | None, language: str, vad: bool = True, device:
         shown = "el modelo por defecto"
     logger.info(f"Cargando {shown} ({COMPUTE_TYPE}, {DEVICE_LABELS[device]})...")
     started = time.perf_counter()
-    transcriber = Transcriber(model, language, vad, device, cpu_threads)
+    transcriber = Transcriber(model, language, vad, device, cpu_threads, initial_prompt)
     logger.info(f"Modelo cargado en {time.perf_counter() - started:.2f} s (incluye calentamiento)")
     return transcriber
 
@@ -689,7 +691,7 @@ def main() -> None:
 
     notify("SpeechFlow", f"Cargando {model}..." if model is not None else "Cargando modelo...")
     try:
-        transcriber = load_transcriber(model, language, config.vad, compute_device, config.cpu_threads)
+        transcriber = load_transcriber(model, language, config.vad, compute_device, config.cpu_threads, config.initial_prompt)
     except Exception as error:
         if compute_device != "cuda":
             raise
@@ -719,7 +721,7 @@ def main() -> None:
                 f"No se puede escribir el historial en {path if path is not None else '(ruta desconocida)'}: {error}. Se sigue sin historial."
             )
 
-    push_to_talk = PushToTalk(key, switch_key, device, transcriber, model_name, language, config.min_seconds, config.max_seconds, config.idle_timeout, config.vad, language_key, auto_key, config.mode, config.punctuation_commands, transcriber.device, config.cpu_threads, config.insert_method, config.terminal_classes, history)
+    push_to_talk = PushToTalk(key, switch_key, device, transcriber, model_name, language, config.min_seconds, config.max_seconds, config.idle_timeout, config.vad, language_key, auto_key, config.mode, config.punctuation_commands, transcriber.device, config.cpu_threads, config.insert_method, config.terminal_classes, history, config.initial_prompt)
     push_to_talk.start_watcher(config.watch_interval)
     listener = keyboard.Listener(on_press=push_to_talk.on_press, on_release=push_to_talk.on_release)
     closing = threading.Event()  # la primera señal lo marca; una segunda fuerza la salida

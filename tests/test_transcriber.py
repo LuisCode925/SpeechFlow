@@ -85,12 +85,12 @@ def test_vad_activo_por_defecto(modelo):
 
 def test_transcribe_pasa_vad_filter(modelo):
     Transcriber().transcribe(np.ones(10, dtype=np.int16))
-    assert modelo.instancias[0].llamadas[-1][1] == {"language": "es", "vad_filter": True}
+    assert modelo.instancias[0].llamadas[-1][1] == {"language": "es", "vad_filter": True, "initial_prompt": None}
 
 
 def test_transcribe_sin_vad_pasa_false(modelo):
     Transcriber(vad=False).transcribe(np.ones(10, dtype=np.int16))
-    assert modelo.instancias[0].llamadas[-1][1] == {"language": "es", "vad_filter": False}
+    assert modelo.instancias[0].llamadas[-1][1] == {"language": "es", "vad_filter": False, "initial_prompt": None}
 
 
 def test_valores_por_defecto(modelo):
@@ -109,7 +109,7 @@ def test_convierte_a_float32_normalizado_y_1d(modelo):
     t.transcribe(np.full((100, 1), 16384, dtype=np.int16))
     muestras, kwargs = modelo.instancias[0].llamadas[-1]
     assert muestras.dtype == np.float32 and muestras.shape == (100,)
-    assert muestras[0] == pytest.approx(0.5) and kwargs == {"language": "es", "vad_filter": True}
+    assert muestras[0] == pytest.approx(0.5) and kwargs == {"language": "es", "vad_filter": True, "initial_prompt": None}
 
 
 def test_une_segmentos_y_mide_tiempo(modelo):
@@ -144,7 +144,7 @@ def test_calentamiento_en_auto_usa_idioma_fijo_por_defecto(modelo):
 def test_idioma_explicito_gana_sobre_el_del_objeto(modelo):
     t = Transcriber(language="es")
     t.transcribe(np.ones(10, dtype=np.int16), language="en")
-    assert modelo.instancias[0].llamadas[-1][1] == {"language": "en", "vad_filter": True}
+    assert modelo.instancias[0].llamadas[-1][1] == {"language": "en", "vad_filter": True, "initial_prompt": None}
     assert t.last_language == "en" and t.language == "es"
 
 
@@ -169,7 +169,7 @@ def test_auto_elige_entre_es_y_en(modelo, probabilidades, esperado):
     modelo.instancias[0].probabilidades = probabilidades
     t.transcribe(np.ones(10, dtype=np.int16))
     assert t.last_language == esperado
-    assert modelo.instancias[0].llamadas[-1][1] == {"language": esperado, "vad_filter": True}
+    assert modelo.instancias[0].llamadas[-1][1] == {"language": esperado, "vad_filter": True, "initial_prompt": None}
 
 
 def test_auto_pasado_por_parametro(modelo):
@@ -327,3 +327,25 @@ class TestDispositivo:
     @pytest.mark.parametrize("device", ["auto", "cpu", "cuda"])
     def test_device_nunca_es_auto(self, modelo, device):
         assert Transcriber("small", "es", device=device).device in ("cpu", "cuda")
+
+
+def test_prompt_vacio_llega_como_none(modelo):
+    Transcriber().transcribe(np.ones(10, dtype=np.int16))
+    assert modelo.instancias[0].llamadas[-1][1]["initial_prompt"] is None
+
+
+def test_prompt_llega_tal_cual(modelo):
+    t = Transcriber(initial_prompt="Hablo de Kubernetes.")
+    t.transcribe(np.ones(10, dtype=np.int16))
+    assert t.initial_prompt == "Hablo de Kubernetes."
+    assert modelo.instancias[0].llamadas[-1][1]["initial_prompt"] == "Hablo de Kubernetes."
+
+
+def test_prompt_no_llega_a_la_deteccion_ni_al_calentamiento(modelo):
+    t = Transcriber(language="auto", initial_prompt="Kubernetes")
+    falso = modelo.instancias[0]
+    assert all("initial_prompt" not in kwargs for _, kwargs in falso.llamadas)  # calentamiento
+    antes = len(falso.detecciones)
+    t.transcribe(np.ones(10, dtype=np.int16))
+    assert len(falso.detecciones) == antes + 1  # detect_language solo recibe el audio, sin kwargs
+    assert falso.llamadas[-1][1]["initial_prompt"] == "Kubernetes"

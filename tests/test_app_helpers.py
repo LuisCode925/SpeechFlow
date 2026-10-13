@@ -110,19 +110,19 @@ class TestLoadTranscriber:
         creados = []
 
         class TranscriberFalso:
-            def __init__(self, model, language, vad, device, cpu_threads):
-                creados.append((model, language, vad, device, cpu_threads))
+            def __init__(self, model, language, vad, device, cpu_threads, initial_prompt):
+                creados.append((model, language, vad, device, cpu_threads, initial_prompt))
 
         monkeypatch.setattr(app, "Transcriber", TranscriberFalso)
         with caplog.at_level("INFO", logger="speechflow"):
-            resultado = app.load_transcriber("small", "en", False, "cuda", 0)
-        assert isinstance(resultado, TranscriberFalso) and creados == [("small", "en", False, "cuda", 0)]
+            resultado = app.load_transcriber("small", "en", False, "cuda", 0, "Kubernetes")
+        assert isinstance(resultado, TranscriberFalso) and creados == [("small", "en", False, "cuda", 0, "Kubernetes")]
         mensajes = [r.getMessage() for r in caplog.records]
         assert mensajes[0] == "Cargando small (int8, GPU)..."
         assert mensajes[1].startswith("Modelo cargado en ") and mensajes[1].endswith(" s (incluye calentamiento)")
 
     def test_no_notifica(self, monkeypatch, subprocess_falso):
-        monkeypatch.setattr(app, "Transcriber", lambda model, language, vad, device, cpu_threads: object())
+        monkeypatch.setattr(app, "Transcriber", lambda model, language, vad, device, cpu_threads, initial_prompt: object())
         app.load_transcriber("small", "en")
         assert subprocess_falso == []
 
@@ -144,7 +144,7 @@ class TestLoadTranscriber:
         recibido = []
         monkeypatch.setattr(app, "Transcriber", lambda *args: recibido.append(args) or object())
         app.load_transcriber("small", "en", True, "cpu", 4)
-        assert recibido == [("small", "en", True, "cpu", 4)]
+        assert recibido == [("small", "en", True, "cpu", 4, "")]
 
 
 class TestIsHeavyForCpu:
@@ -248,7 +248,7 @@ class TestMainDispositivo:
         llamadas, Parada = ejecutar_main(monkeypatch, ["--compute-device", "cpu"], t, config=Config(device_compute="cuda", cpu_threads=3))
         with pytest.raises(Parada):
             app.main()
-        assert llamadas[0][3:] == ("cpu", 3)
+        assert llamadas[0][3:] == ("cpu", 3, "")
         assert llamadas[1][1][14:16] == ("cpu", 3)
 
     def test_push_to_talk_recibe_el_dispositivo_resuelto_no_auto(self, monkeypatch):
@@ -468,7 +468,7 @@ class TestMainHistorial:
         llamadas, Parada = ejecutar_main(monkeypatch, [], t, config=config)
         with pytest.raises(Parada):
             app.main()
-        return llamadas[1][1][-1]  # último argumento de PushToTalk: history
+        return llamadas[1][1][18]  # history
 
     def test_activo_por_defecto(self, monkeypatch, tmp_path):
         history = self.correr(monkeypatch)

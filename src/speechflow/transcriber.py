@@ -26,6 +26,7 @@ class Transcriber:
         vad: bool = True,
         device: str = "auto",
         cpu_threads: int = 0,
+        initial_prompt: str = "",
     ) -> None:
         """Carga el modelo (int8) y lo calienta; `language` es el idioma por defecto de transcribe().
 
@@ -36,6 +37,7 @@ class Transcriber:
         """
         self.language = language
         self.vad = vad
+        self.initial_prompt = initial_prompt  # contexto para Whisper en transcribe(); "" = sin prompt
         self.last_language: str | None = None  # idioma usado en la última llamada a transcribe()
         self._model = None
         if device == "auto":
@@ -110,7 +112,9 @@ class Transcriber:
         if language == AUTO_LANGUAGE:
             language = self._detect(samples)
         self.last_language = language
-        segments, _info = self._model.transcribe(samples, language=language, vad_filter=self.vad)
+        segments, _info = self._model.transcribe(
+            samples, language=language, vad_filter=self.vad, initial_prompt=self.initial_prompt or None
+        )
         text = " ".join(segment.text.strip() for segment in segments)
         return text, time.perf_counter() - start
 
