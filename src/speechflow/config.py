@@ -32,11 +32,14 @@ class Config:
     cpu_threads: int = 0  # [model] cpu_threads; 0 = defecto de faster-whisper
     log_level: str = "info"  # [log] level; nivel de la consola
     log_file_level: str = "info"  # [log] file_level; nivel del archivo de log
+    insert_method: str = "clipboard"  # [text] insert_method; "clipboard" (copia y pega) o "type" (teclea con xdotool)
+    terminal_classes: tuple[str, ...] = ()  # [text] terminal_classes; se suman a TERMINAL_CLASSES del inserter
 
 
 RECORDING_MODES = ("hold", "toggle")
 COMPUTE_DEVICES = ("auto", "cpu", "cuda")
 LOG_LEVELS = ("debug", "info", "warning", "error")
+INSERT_METHODS = ("clipboard", "type")
 
 
 class ConfigError(Exception):
@@ -66,7 +69,11 @@ _SCHEMA: dict[str, dict[str, tuple[tuple[type, ...], str]]] = {
         "mode": ((str,), "mode"),
     },
     "notifications": {"enabled": ((bool,), "notifications")},
-    "text": {"punctuation_commands": ((bool,), "punctuation_commands")},
+    "text": {
+        "punctuation_commands": ((bool,), "punctuation_commands"),
+        "insert_method": ((str,), "insert_method"),
+        "terminal_classes": ((list,), "terminal_classes"),
+    },
     "log": {"level": ((str,), "log_level"), "file_level": ((str,), "log_file_level")},
 }
 
@@ -138,6 +145,10 @@ def load_config(path: Path) -> Config:
             if not isinstance(value, types) or (isinstance(value, bool) and bool not in types):
                 names = " o ".join(t.__name__ for t in types)
                 raise ConfigError(f"{section}.{key} debe ser {names}, no {type(value).__name__}")
+            if field == "terminal_classes":
+                if not all(isinstance(v, str) and v.strip() for v in value):
+                    raise ConfigError("text.terminal_classes debe ser una lista de textos no vacíos")
+                value = tuple(value)
             values[field] = float(value) if field in ("min_seconds", "max_seconds", "watch_interval", "idle_timeout") else value
 
     config = Config(**values)
@@ -155,6 +166,8 @@ def load_config(path: Path) -> Config:
         raise ConfigError(f'model.device debe ser "auto", "cpu" o "cuda", no {config.device_compute!r}')
     if config.cpu_threads < 0:
         raise ConfigError(f"model.cpu_threads debe ser 0 o mayor, no {config.cpu_threads}")
+    if config.insert_method not in INSERT_METHODS:
+        raise ConfigError(f'text.insert_method debe ser "clipboard" o "type", no {config.insert_method!r}')
     for key, value in (("level", config.log_level), ("file_level", config.log_file_level)):
         if value not in LOG_LEVELS:
             raise ConfigError(f'log.{key} debe ser "debug", "info", "warning" o "error", no {value!r}')
@@ -198,6 +211,8 @@ def _emergency_template() -> str:
         "\n"
         "[text]\n"
         f'punctuation_commands = {str(d.punctuation_commands).lower()}  # sustituye "punto", "coma", "nueva línea"... por su signo; false inserta lo que transcribe Whisper\n'
+        f"insert_method = {json.dumps(d.insert_method)}  # \"clipboard\": copia y pega con Ctrl+V (Ctrl+Shift+V en terminales) y restaura el portapapeles; \"type\": teclea con xdotool\n"
+        "# terminal_classes = []  # clases de ventana extra que se pegan con Ctrl+Shift+V; ver: xdotool getwindowfocus getwindowclassname\n"
         "\n"
         "[log]\n"
         f"level = {json.dumps(d.log_level)}  # nivel de la consola: \"debug\", \"info\", \"warning\" o \"error\"; --quiet, --verbose y --log-level ganan\n"

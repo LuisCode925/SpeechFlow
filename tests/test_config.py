@@ -241,6 +241,38 @@ class TestLoadConfig:
         with pytest.raises(ConfigError, match="text.punctuation_commands debe ser bool"):
             config.load_config(escribir(tmp_path, f"[text]\npunctuation_commands = {valor}\n"))
 
+    def test_insert_method_defectos(self, tmp_path):
+        c = config.load_config(escribir(tmp_path, ""))
+        assert c.insert_method == "clipboard" and c.terminal_classes == ()
+        assert Config().insert_method == "clipboard" and Config().terminal_classes == ()
+
+    @pytest.mark.parametrize("valor", ["clipboard", "type"])
+    def test_insert_method_valido(self, tmp_path, valor):
+        c = config.load_config(escribir(tmp_path, f'[text]\ninsert_method = "{valor}"\n'))
+        assert c.insert_method == valor
+
+    def test_insert_method_invalido(self, tmp_path):
+        with pytest.raises(ConfigError, match="text.insert_method"):
+            config.load_config(escribir(tmp_path, '[text]\ninsert_method = "paste"\n'))
+
+    def test_insert_method_tipo_invalido(self, tmp_path):
+        with pytest.raises(ConfigError, match="text.insert_method debe ser str"):
+            config.load_config(escribir(tmp_path, "[text]\ninsert_method = 1\n"))
+
+    def test_terminal_classes_valida(self, tmp_path):
+        c = config.load_config(escribir(tmp_path, '[text]\nterminal_classes = ["myterm"]\n'))
+        assert c.terminal_classes == ("myterm",)
+
+    @pytest.mark.parametrize("valor", ['[""]', "[1]", '["  "]'])
+    def test_terminal_classes_elemento_invalido(self, tmp_path, valor):
+        with pytest.raises(ConfigError, match="text.terminal_classes"):
+            config.load_config(escribir(tmp_path, f"[text]\nterminal_classes = {valor}\n"))
+
+    @pytest.mark.parametrize("valor", ['"myterm"', "1"])
+    def test_terminal_classes_tipo_invalido(self, tmp_path, valor):
+        with pytest.raises(ConfigError, match="text.terminal_classes debe ser list"):
+            config.load_config(escribir(tmp_path, f"[text]\nterminal_classes = {valor}\n"))
+
     def test_text_clave_desconocida(self, tmp_path):
         with pytest.raises(ConfigError, match="clave desconocida text.foo"):
             config.load_config(escribir(tmp_path, "[text]\nfoo = true\n"))
