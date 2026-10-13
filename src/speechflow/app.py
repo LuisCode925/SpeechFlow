@@ -28,6 +28,7 @@ import signal
 import sys
 import threading
 import time
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
@@ -35,7 +36,8 @@ import sounddevice as sd
 from pynput import keyboard
 
 from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, device_index, device_name, input_device_by_name, list_devices, next_input_device, parse_device, refresh_devices
-from speechflow.config import COMPUTE_DEVICES, LOG_LEVELS, Config, ConfigError, find_config, load_config, load_state_device, load_state_language, save_state_device, save_state_language, user_config_path, write_emergency
+from speechflow.config import COMPUTE_DEVICES, LOG_LEVELS, Config, ConfigError, find_config, history_path, load_config, load_state_device, load_state_language, save_state_device, save_state_language, user_config_path, write_emergency
+from speechflow.history import HISTORY_BACKUP_COUNT, History
 from speechflow.inserter import insert_text
 from speechflow.log import LOGGER_NAME, apply_log_levels, log_banner, setup_logging
 from speechflow.notifier import notify, set_enabled
@@ -76,6 +78,7 @@ class PushToTalk:
         cpu_threads: int = 0,
         insert_method: str = "clipboard",
         terminal_classes: tuple[str, ...] = (),
+        history: History | None = None,
     ) -> None:
         self.key = key
         self.compute_device = compute_device  # dispositivo ya resuelto en main(): una recarga no reintenta la GPU fallida
@@ -83,6 +86,8 @@ class PushToTalk:
         self.punctuation_commands = punctuation_commands  # se lee solo al arrancar
         self.insert_method = insert_method  # "clipboard" o "type"; se lee solo al arrancar
         self.terminal_classes = terminal_classes  # se suman a TERMINAL_CLASSES; se lee solo al arrancar
+        self.history = history  # None = sin historial; se lee solo al arrancar
+        self._history_failed = False  # True tras un fallo de escritura avisado; una escritura correcta lo rearma
         self.mode = mode  # "hold" o "toggle"; se lee solo al arrancar
         self.switch_key = switch_key
         self.language_key = language_key  # None = sin tecla
@@ -386,6 +391,7 @@ class PushToTalk:
             original = text
             if self.punctuation_commands:
                 text = apply_voice_punctuation(text, transcriber.last_language)
+            self._save_history(text, original, transcriber.last_language, len(audio) / SAMPLE_RATE, seconds)
             insert_text(text, self.insert_method, self.terminal_classes)
             realtime = seconds / (len(audio) / SAMPLE_RATE)
             if text != original:
@@ -398,6 +404,28 @@ class PushToTalk:
             with self._lock:
                 self.state = State.IDLE
                 self._arm_idle_timer()
+
+    def _save_history(self, text: str, original: str, language: str, audio_seconds: float, seconds: float) -> None:
+        """Guarda el dictado en el historial; un fallo avisa una sola vez seguida y nunca interrumpe la inserción."""
+        if self.history is None:
+            return
+        entry = {
+            "ts": datetime.now().astimezone().isoformat(timespec="milliseconds"),
+            "text": text,
+            "original": original,
+            "language": language,
+            "model": self.model_name,
+            "audio_seconds": round(audio_seconds, 2),
+            "seconds": round(seconds, 2),
+        }
+        try:
+            self.history.add(entry)
+        except Exception as error:
+            if not self._history_failed:
+                self._history_failed = True
+                logger.warning(f"No se pudo guardar el dictado en el historial: {error}")
+            return
+        self._history_failed = False
 
     def begin_shutdown(self) -> None:
         """Marca el cierre (las teclas dejan de tener efecto) y descarta una grabación en curso sin transcribirla."""
@@ -680,7 +708,18 @@ def main() -> None:
     logger.info(f"Cambio de idioma: tecla {config.language_key!r}; modo automático: tecla {config.auto_key!r}.")
     logger.info(ready_message(key_name, config.mode))
 
-    push_to_talk = PushToTalk(key, switch_key, device, transcriber, model_name, language, config.min_seconds, config.max_seconds, config.idle_timeout, config.vad, language_key, auto_key, config.mode, config.punctuation_commands, transcriber.device, config.cpu_threads, config.insert_method, config.terminal_classes)
+    history = None
+    if config.history_enabled:
+        path = None
+        try:
+            path = history_path()
+            history = History(path, int(config.history_max_mb * 1024 * 1024), HISTORY_BACKUP_COUNT)
+        except (OSError, RuntimeError) as error:
+            logger.warning(
+                f"No se puede escribir el historial en {path if path is not None else '(ruta desconocida)'}: {error}. Se sigue sin historial."
+            )
+
+    push_to_talk = PushToTalk(key, switch_key, device, transcriber, model_name, language, config.min_seconds, config.max_seconds, config.idle_timeout, config.vad, language_key, auto_key, config.mode, config.punctuation_commands, transcriber.device, config.cpu_threads, config.insert_method, config.terminal_classes, history)
     push_to_talk.start_watcher(config.watch_interval)
     listener = keyboard.Listener(on_press=push_to_talk.on_press, on_release=push_to_talk.on_release)
     closing = threading.Event()  # la primera señal lo marca; una segunda fuerza la salida
@@ -711,3 +750,5 @@ def main() -> None:
     if push_to_talk.shutdown():
         logger.info(f"Modelo {model_name} liberado.")
         notify("SpeechFlow", "Modelo liberado")
+    if history is not None:
+        history.close()

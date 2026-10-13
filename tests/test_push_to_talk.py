@@ -1,6 +1,7 @@
 """Tests de PushToTalk con dobles de Recorder, Transcriber, notify e insert_text."""
 import threading
 import time
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -933,3 +934,115 @@ class TestInsercionConfigurada:
         ptt.on_release(R)
         assert dobles.insertado.wait(2)
         assert dobles.opciones == [("clipboard", ())]
+
+
+class HistoryFalso:
+    """Sustituye a History: guarda las entradas y puede fallar al escribir."""
+
+    def __init__(self):
+        self.entradas = []
+        self.error = None
+        self.eventos = None  # lista compartida con el doble de insert_text para comprobar el orden
+
+    def add(self, entry):
+        if self.error is not None:
+            raise self.error
+        self.entradas.append(entry)
+        if self.eventos is not None:
+            self.eventos.append("history")
+
+
+class TestHistorial:
+    def dictar(self, ptt):
+        ptt.on_press(R)
+        ptt.on_release(R)
+        esperar_idle(ptt)
+
+    def test_guarda_el_dictado_con_los_siete_campos(self, crear_ptt, dobles):
+        history = HistoryFalso()
+        ptt = crear_ptt(history=history)
+        self.dictar(ptt)
+        assert len(history.entradas) == 1
+        e = history.entradas[0]
+        assert set(e) == {"ts", "text", "original", "language", "model", "audio_seconds", "seconds"}
+        assert (e["text"], e["original"], e["language"], e["model"]) == ("hola mundo", "hola mundo", "es", "medium")
+        assert e["audio_seconds"] == 1.0 and e["seconds"] == 0.1
+        assert datetime.fromisoformat(e["ts"]).utcoffset() is not None and e["ts"].count(".") == 1
+
+    def test_text_con_puntuacion_y_original_de_whisper(self, crear_ptt):
+        history = HistoryFalso()
+        ptt = crear_ptt(transcriber=TranscriberFalso(texto="hola coma mundo punto"), punctuation_commands=True, history=history)
+        self.dictar(ptt)
+        assert (history.entradas[0]["text"], history.entradas[0]["original"]) == ("Hola, mundo.", "hola coma mundo punto")
+
+    def test_sin_puntuacion_text_y_original_iguales(self, crear_ptt):
+        history = HistoryFalso()
+        ptt = crear_ptt(transcriber=TranscriberFalso(texto="hola coma mundo punto"), punctuation_commands=False, history=history)
+        self.dictar(ptt)
+        assert history.entradas[0]["text"] == history.entradas[0]["original"] == "hola coma mundo punto"
+
+    def test_en_auto_guarda_el_idioma_detectado(self, crear_ptt):
+        history = HistoryFalso()
+        ptt = crear_ptt(transcriber=TranscriberFalso(texto="hello", detectado="en"), language="auto", history=history)
+        self.dictar(ptt)
+        assert history.entradas[0]["language"] == "en"
+
+    def test_sin_texto_no_se_guarda(self, crear_ptt):
+        history = HistoryFalso()
+        ptt = crear_ptt(transcriber=TranscriberFalso(texto=""), history=history)
+        self.dictar(ptt)
+        assert history.entradas == []
+
+    def test_audio_descartado_no_se_guarda(self, crear_ptt):
+        history = HistoryFalso()
+        ptt = crear_ptt(history=history)
+        ptt.recorder.segundos = 0.05
+        self.dictar(ptt)
+        assert history.entradas == []
+
+    def test_se_guarda_antes_de_insertar(self, crear_ptt, dobles):
+        history = HistoryFalso()
+        history.eventos = []
+        original = dobles.opciones.append
+        dobles.opciones = SimpleNamespace(append=lambda x: (history.eventos.append("insert"), original(x)))
+        ptt = crear_ptt(history=history)
+        self.dictar(ptt)
+        assert history.eventos == ["history", "insert"]
+
+    def test_se_guarda_aunque_insert_text_falle(self, crear_ptt, dobles, caplog):
+        dobles.error_insercion = RuntimeError("xdotool falló")
+        history = HistoryFalso()
+        ptt = crear_ptt(history=history)
+        self.dictar(ptt)
+        assert len(history.entradas) == 1
+        assert "Error: xdotool falló" in mensajes(caplog, "ERROR")
+
+    def test_fallo_de_escritura_no_impide_la_insercion(self, crear_ptt, dobles, caplog):
+        history = HistoryFalso()
+        history.error = OSError("disco lleno")
+        ptt = crear_ptt(history=history)
+        self.dictar(ptt)
+        assert dobles.textos == ["hola mundo"]
+        assert mensajes(caplog, "WARNING") == ["No se pudo guardar el dictado en el historial: disco lleno"]
+
+    def test_el_aviso_sale_una_sola_vez_y_se_rearma(self, crear_ptt, dobles, caplog):
+        history = HistoryFalso()
+        history.error = OSError("disco lleno")
+        ptt = crear_ptt(history=history)
+        self.dictar(ptt)
+        self.dictar(ptt)
+        assert len(mensajes(caplog, "WARNING")) == 1
+        history.error = None  # una escritura correcta rearma el aviso
+        self.dictar(ptt)
+        assert len(history.entradas) == 1 and len(mensajes(caplog, "WARNING")) == 1
+        history.error = OSError("otra vez")
+        self.dictar(ptt)
+        assert mensajes(caplog, "WARNING")[-1] == "No se pudo guardar el dictado en el historial: otra vez"
+        assert len(mensajes(caplog, "WARNING")) == 2
+        assert dobles.textos == ["hola mundo"] * 4
+
+    def test_sin_historial_por_defecto(self, crear_ptt, dobles):
+        ptt = crear_ptt()
+        assert ptt.history is None
+        self.dictar(ptt)
+        assert dobles.textos == ["hola mundo"]

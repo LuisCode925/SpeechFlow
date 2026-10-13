@@ -460,3 +460,34 @@ class TestMainInsercion:
         with pytest.raises(SystemExit):
             app.main()
         assert "Falta xdotool" in caplog.text and "Falta xclip" not in caplog.text
+
+
+class TestMainHistorial:
+    def correr(self, monkeypatch, config=None):
+        t = type("T", (), {"device": "cpu", "model_name": "small"})()
+        llamadas, Parada = ejecutar_main(monkeypatch, [], t, config=config)
+        with pytest.raises(Parada):
+            app.main()
+        return llamadas[1][1][-1]  # último argumento de PushToTalk: history
+
+    def test_activo_por_defecto(self, monkeypatch, tmp_path):
+        history = self.correr(monkeypatch)
+        assert isinstance(history, app.History)
+        assert (tmp_path / "xdg-state" / "speechflow" / "history.jsonl").is_file()
+        history.close()
+
+    def test_desactivado_no_crea_el_archivo(self, monkeypatch, tmp_path):
+        assert self.correr(monkeypatch, Config(history_enabled=False)) is None
+        assert not (tmp_path / "xdg-state" / "speechflow" / "history.jsonl").exists()
+
+    def test_max_mb_se_pasa_en_bytes(self, monkeypatch):
+        history = self.correr(monkeypatch, Config(history_max_mb=2))
+        assert history._handler.maxBytes == 2 * 1024 * 1024
+        history.close()
+
+    def test_carpeta_no_escribible_avisa_y_sigue(self, monkeypatch, tmp_path, caplog):
+        (tmp_path / "xdg-state").write_text("no es una carpeta")
+        assert self.correr(monkeypatch) is None
+        avisos = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+        ruta = tmp_path / "xdg-state" / "speechflow" / "history.jsonl"
+        assert any(m.startswith(f"No se puede escribir el historial en {ruta}: ") and m.endswith(". Se sigue sin historial.") for m in avisos)
