@@ -85,7 +85,7 @@ print(f"{seconds:.2f} s: {text}")
 
 - **Entrada:** `numpy.ndarray` `int16`, mono, a 16 kHz. El módulo no valida la tasa: un audio a otra tasa da transcripciones erróneas sin aviso.
 - **Salida:** `(texto, segundos)`. Los segundos no incluyen la carga del modelo ni el calentamiento. Un array vacío devuelve `("", 0.0)` sin invocar al modelo.
-- **Parámetros:** modelo (defecto `medium`), idioma por defecto (defecto `es`; `"auto"` detecta entre `es` y `en`) y `vad` (defecto `True`). `transcribe(audio, language=None)` acepta un idioma para esa llamada (`None` usa el del objeto; `"auto"` activa la detección) y deja el idioma realmente usado en `last_language`.
+- **Parámetros:** modelo (sin fijar: `medium` en GPU y `small` en CPU; uno explícito se usa siempre y queda en `Transcriber.model_name`), idioma por defecto (defecto `es`; `"auto"` detecta entre `es` y `en`) y `vad` (defecto `True`). `transcribe(audio, language=None)` acepta un idioma para esa llamada (`None` usa el del objeto; `"auto"` activa la detección) y deja el idioma realmente usado en `last_language`.
 - **Detección automática:** con `"auto"`, `WhisperModel.detect_language()` elige el de mayor probabilidad entre `es` y `en` (aunque otro idioma tenga la mayor) y transcribe con ese. Los segundos devueltos incluyen la detección. Si la detección falla (por ejemplo, audio sin voz), se usa el idioma fijo del objeto, o `es` si no es `es` ni `en`. El calentamiento llama también a `detect_language()` sobre un segundo de silencio.
 - **VAD:** con `vad=True`, cada transcripción usa `vad_filter` de `faster-whisper` (Silero, parámetros por defecto: se descartan silencios de 2 s o más, con 400 ms de margen), para que el silencio y el ruido sin voz no produzcan texto inventado. Una grabación sin voz devuelve texto vacío. El calentamiento hace una llamada extra con el filtro para cargar Silero al arrancar. `vad=False` lo desactiva.
 - **Liberación:** `close()` suelta la referencia al modelo y fuerza la recolección de basura para liberar la GPU. Es idempotente; no se debe llamar a `transcribe()` después.
@@ -108,7 +108,7 @@ La lógica vive en `src/speechflow/app.py` (`State`, `PushToTalk`, `parse_key`, 
 
 ```bash
 speechflow --list-devices   # lista los dispositivos de entrada
-speechflow                  # Right Ctrl, modelo medium, español
+speechflow                  # Right Ctrl, modelo medium en GPU (small en CPU), español
 speechflow --key f9         # otra tecla de disparo
 speechflow --switch-key f7  # otra tecla de cambio de entrada
 speechflow --device 6 --model small --language en
@@ -164,7 +164,7 @@ Opciones:
 | ------ | ----------- | ------- |
 | `--list-devices` | Lista los dispositivos de entrada y termina (`>` marca el del sistema). | — |
 | `--device` | Índice o nombre del dispositivo de entrada. Falla con un mensaje claro si no existe. | primero que contenga "Realtek"; si no, el del sistema |
-| `--model` | Modelo de `faster-whisper`. | `medium` |
+| `--model` | Modelo de `faster-whisper`. | `small` en CPU, `medium` en GPU |
 | `--language` | Idioma de la transcripción: `es`, `en`, otro idioma de Whisper, o `auto` (detecta entre `es` y `en` en cada dictado). | `es` |
 | `--key` | Tecla de disparo: nombre de `pynput.keyboard.Key` (`ctrl_r`, `f9`, ...) o un carácter suelto. Falla con un mensaje claro si no existe. | `ctrl_r` |
 | `--switch-key` | Tecla de cambio de entrada de audio, mismo formato que `--key`. Debe ser distinta de `--key`; si no, el script sale con código 1. | `f8` |
@@ -238,15 +238,17 @@ Whisper puede ejecutarse sin GPU. La clave `[model] device` y la opción `--comp
 
 - **Hilos:** `[model] cpu_threads` (entero, `0` por defecto) fija los hilos de CPU de Whisper; `0` deja el valor por defecto de `faster-whisper`. Solo cuenta cuando el dispositivo resuelto es CPU; un valor negativo hace inválido el archivo.
 - **Tipo de cómputo:** `int8` en CPU y en GPU.
-- **Log:** muestra el dispositivo real (`Cargando medium (int8, CPU)...`, `Modelo: medium | ... | CPU | ...`).
-- **Lentitud:** con CPU y un modelo `medium` o mayor se registra un `WARNING` de que la transcripción será lenta y se sugiere `small` (`--model small`). El modelo por defecto no cambia.
+- **Modelo por defecto:** si no fijas `--model` ni `[model] name`, se carga `small` cuando el dispositivo resuelto es CPU (incluido `auto` sin GPU o con la GPU fallida) y `medium` en GPU. Se registra `Modelo no fijado: se usa small por defecto en CPU.` Con `auto` sin modelo fijado, el log inicial dice `Cargando el modelo por defecto (int8, auto)...` y la notificación `Cargando modelo...`; el modelo real aparece tras cargar. La primera vez `small` se descarga de Hugging Face (~0.5 GB).
+- **Log:** muestra el dispositivo y el modelo reales (`Cargando small (int8, CPU)...`, `Modelo: small | ... | CPU | ...`).
+- **Forzar `medium` en CPU:** `--model medium` o `[model] name = "medium"`. Un modelo fijado se respeta siempre y, con `medium` o mayor en CPU, se registra un `WARNING` de lentitud que sugiere `small`.
 - **Recargas:** tras la liberación por inactividad (`idle_timeout`) el modelo se recarga en el dispositivo ya resuelto, así que no se vuelve a intentar una GPU que falló.
 - **Reinicio:** `device` y `cpu_threads` se leen solo al arrancar.
 - **Entorno:** `environment.yml` no cambia; cuBLAS y cuDNN se instalan aunque en CPU no se usen.
 - **Límite:** un fallo nativo del driver que aborte el proceso no se puede capturar; en ese caso usa `--compute-device cpu` o `CUDA_VISIBLE_DEVICES=""`.
 
 ```bash
-speechflow --compute-device cpu --model small
+speechflow --compute-device cpu                  # carga small
+speechflow --compute-device cpu --model medium  # fuerza medium (lento)
 CUDA_VISIBLE_DEVICES="" speechflow --compute-device cpu
 ```
 
@@ -274,7 +276,7 @@ Las carpetas se crean al escribir la plantilla, el estado o el log. Un `speechfl
 
 ```toml
 [model]
-name = "medium"
+# name = "medium"           # sin fijar: medium en GPU, small en CPU; fijarlo lo usa en cualquier dispositivo
 language = "es"                # "es", "en", otro idioma de Whisper, o "auto" (detecta entre es y en en cada dictado)
 idle_timeout = 0.0          # segundos sin dictar antes de liberar el modelo de la GPU; 0 desactiva; mínimo 30.0
 device = "auto"             # "auto": GPU si hay y funciona, si no CPU; "cpu": solo CPU; "cuda": solo GPU (falla si no hay)

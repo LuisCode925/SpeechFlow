@@ -1,6 +1,6 @@
 # SPEC 23 — Modelo `small` por defecto en CPU
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 04, SPEC 10, SPEC 12, SPEC 16, SPEC 22
 > **Fecha:** 2026-10-12
 > **Objetivo:** Hacer que, cuando el usuario no fija el modelo (`[model] name` ni `--model`), `Transcriber` cargue `small` si el dispositivo resuelto es CPU y `medium` si es GPU.
