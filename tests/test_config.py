@@ -261,6 +261,30 @@ class TestLoadConfig:
         with pytest.raises(ConfigError, match=mensaje):
             config.load_config(escribir(tmp_path, texto))
 
+    def test_log_defectos(self, tmp_path):
+        c = config.load_config(escribir(tmp_path, ""))
+        assert Config().log_level == "info" and Config().log_file_level == "info"
+        assert c.log_level == "info" and c.log_file_level == "info"
+
+    @pytest.mark.parametrize("valor", ["debug", "info", "warning", "error"])
+    def test_log_valido(self, tmp_path, valor):
+        c = config.load_config(escribir(tmp_path, f'[log]\nlevel = "{valor}"\nfile_level = "{valor}"\n'))
+        assert c.log_level == valor and c.log_file_level == valor
+
+    @pytest.mark.parametrize("valor", ["trace", "INFO", ""])
+    @pytest.mark.parametrize("clave", ["level", "file_level"])
+    def test_log_valor_invalido(self, tmp_path, clave, valor):
+        with pytest.raises(ConfigError, match=f"log.{clave}"):
+            config.load_config(escribir(tmp_path, f'[log]\n{clave} = "{valor}"\n'))
+
+    def test_log_tipo_invalido(self, tmp_path):
+        with pytest.raises(ConfigError, match="log.level debe ser str, no int"):
+            config.load_config(escribir(tmp_path, "[log]\nlevel = 1\n"))
+
+    def test_log_clave_desconocida(self, tmp_path):
+        with pytest.raises(ConfigError, match="clave desconocida log.path"):
+            config.load_config(escribir(tmp_path, '[log]\npath = "x"\n'))
+
     @pytest.mark.parametrize(
         "texto",
         ["[audio]\nwatch_interval = 1.0\n", "[model]\nidle_timeout = 30\n", "[model]\nidle_timeout = 0\n"],

@@ -30,10 +30,13 @@ class Config:
     punctuation_commands: bool = True  # [text] punctuation_commands; sustituye "punto", "coma"... por su signo
     device_compute: str = "auto"  # [model] device; "auto", "cpu" o "cuda"
     cpu_threads: int = 0  # [model] cpu_threads; 0 = defecto de faster-whisper
+    log_level: str = "info"  # [log] level; nivel de la consola
+    log_file_level: str = "info"  # [log] file_level; nivel del archivo de log
 
 
 RECORDING_MODES = ("hold", "toggle")
 COMPUTE_DEVICES = ("auto", "cpu", "cuda")
+LOG_LEVELS = ("debug", "info", "warning", "error")
 
 
 class ConfigError(Exception):
@@ -64,6 +67,7 @@ _SCHEMA: dict[str, dict[str, tuple[tuple[type, ...], str]]] = {
     },
     "notifications": {"enabled": ((bool,), "notifications")},
     "text": {"punctuation_commands": ((bool,), "punctuation_commands")},
+    "log": {"level": ((str,), "log_level"), "file_level": ((str,), "log_file_level")},
 }
 
 
@@ -151,6 +155,9 @@ def load_config(path: Path) -> Config:
         raise ConfigError(f'model.device debe ser "auto", "cpu" o "cuda", no {config.device_compute!r}')
     if config.cpu_threads < 0:
         raise ConfigError(f"model.cpu_threads debe ser 0 o mayor, no {config.cpu_threads}")
+    for key, value in (("level", config.log_level), ("file_level", config.log_file_level)):
+        if value not in LOG_LEVELS:
+            raise ConfigError(f'log.{key} debe ser "debug", "info", "warning" o "error", no {value!r}')
     if config.watch_interval < 1.0:
         raise ConfigError(f"audio.watch_interval debe ser al menos 1.0, no {config.watch_interval}")
     if config.idle_timeout != 0 and config.idle_timeout < 30.0:
@@ -191,6 +198,10 @@ def _emergency_template() -> str:
         "\n"
         "[text]\n"
         f'punctuation_commands = {str(d.punctuation_commands).lower()}  # sustituye "punto", "coma", "nueva línea"... por su signo; false inserta lo que transcribe Whisper\n'
+        "\n"
+        "[log]\n"
+        f"level = {json.dumps(d.log_level)}  # nivel de la consola: \"debug\", \"info\", \"warning\" o \"error\"; --quiet, --verbose y --log-level ganan\n"
+        f"file_level = {json.dumps(d.log_file_level)}  # nivel del archivo speechflow.log; las opciones de CLI no lo cambian\n"
     )
 
 
