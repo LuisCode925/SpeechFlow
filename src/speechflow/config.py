@@ -34,6 +34,8 @@ class Config:
     log_file_level: str = "info"  # [log] file_level; nivel del archivo de log
     insert_method: str = "clipboard"  # [text] insert_method; "clipboard" (copia y pega) o "type" (teclea con xdotool)
     terminal_classes: tuple[str, ...] = ()  # [text] terminal_classes; se suman a TERMINAL_CLASSES del inserter
+    history_enabled: bool = True  # [history] enabled; guarda cada dictado en history.jsonl
+    history_max_mb: float = 5.0  # [history] max_mb; tamaño del archivo activo antes de rotar
 
 
 RECORDING_MODES = ("hold", "toggle")
@@ -75,6 +77,7 @@ _SCHEMA: dict[str, dict[str, tuple[tuple[type, ...], str]]] = {
         "terminal_classes": ((list,), "terminal_classes"),
     },
     "log": {"level": ((str,), "log_level"), "file_level": ((str,), "log_file_level")},
+    "history": {"enabled": ((bool,), "history_enabled"), "max_mb": ((int, float), "history_max_mb")},
 }
 
 
@@ -108,6 +111,10 @@ def state_path() -> Path:
 
 def log_path() -> Path:
     return state_dir() / "speechflow.log"
+
+
+def history_path() -> Path:
+    return state_dir() / "history.jsonl"
 
 
 def find_config(explicit: Path | None) -> Path | None:
@@ -149,7 +156,7 @@ def load_config(path: Path) -> Config:
                 if not all(isinstance(v, str) and v.strip() for v in value):
                     raise ConfigError("text.terminal_classes debe ser una lista de textos no vacíos")
                 value = tuple(value)
-            values[field] = float(value) if field in ("min_seconds", "max_seconds", "watch_interval", "idle_timeout") else value
+            values[field] = float(value) if field in ("min_seconds", "max_seconds", "watch_interval", "idle_timeout", "history_max_mb") else value
 
     config = Config(**values)
     if config.model is not None and not config.model.strip():
@@ -175,6 +182,8 @@ def load_config(path: Path) -> Config:
         raise ConfigError(f"audio.watch_interval debe ser al menos 1.0, no {config.watch_interval}")
     if config.idle_timeout != 0 and config.idle_timeout < 30.0:
         raise ConfigError(f"model.idle_timeout debe ser 0 o al menos 30.0, no {config.idle_timeout}")
+    if config.history_max_mb <= 0:
+        raise ConfigError(f"history.max_mb debe ser mayor que 0, no {config.history_max_mb}")
     return config
 
 
@@ -217,6 +226,10 @@ def _emergency_template() -> str:
         "[log]\n"
         f"level = {json.dumps(d.log_level)}  # nivel de la consola: \"debug\", \"info\", \"warning\" o \"error\"; --quiet, --verbose y --log-level ganan\n"
         f"file_level = {json.dumps(d.log_file_level)}  # nivel del archivo speechflow.log; las opciones de CLI no lo cambian\n"
+        "\n"
+        "[history]\n"
+        f"enabled = {str(d.history_enabled).lower()}  # guarda cada dictado en history.jsonl (texto en claro, permisos 0600); false no crea el archivo\n"
+        f"max_mb = {d.history_max_mb}  # tamaño máximo del archivo activo antes de rotar (se conservan 2 copias); mayor que 0\n"
     )
 
 

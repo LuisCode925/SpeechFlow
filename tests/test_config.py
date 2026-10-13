@@ -55,6 +55,10 @@ class TestRutasXdg:
         esperado = Path.home() / ".local" / "state" / "speechflow" / "speechflow.log"
         assert config.log_path() == esperado
 
+    def test_history_path(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "s"))
+        assert config.history_path() == tmp_path / "s" / "speechflow" / "history.jsonl"
+
     def test_sin_home_lanza_runtimeerror(self, monkeypatch):
         """Sin HOME ni variable XDG, expanduser falla con RuntimeError."""
         monkeypatch.delenv("XDG_CONFIG_HOME")
@@ -316,6 +320,38 @@ class TestLoadConfig:
     def test_log_clave_desconocida(self, tmp_path):
         with pytest.raises(ConfigError, match="clave desconocida log.path"):
             config.load_config(escribir(tmp_path, '[log]\npath = "x"\n'))
+
+    def test_history_defectos(self, tmp_path):
+        c = config.load_config(escribir(tmp_path, ""))
+        assert Config().history_enabled is True and Config().history_max_mb == 5.0
+        assert c.history_enabled is True and c.history_max_mb == 5.0
+
+    def test_history_valido(self, tmp_path):
+        c = config.load_config(escribir(tmp_path, "[history]\nenabled = false\nmax_mb = 2\n"))
+        assert c.history_enabled is False and c.history_max_mb == 2.0 and isinstance(c.history_max_mb, float)
+        c = config.load_config(escribir(tmp_path, "[history]\nmax_mb = 0.5\n"))
+        assert c.history_max_mb == 0.5
+
+    @pytest.mark.parametrize("valor", ["0", "-1", "0.0"])
+    def test_history_max_mb_no_positivo(self, tmp_path, valor):
+        with pytest.raises(ConfigError, match="history.max_mb"):
+            config.load_config(escribir(tmp_path, f"[history]\nmax_mb = {valor}\n"))
+
+    def test_history_max_mb_texto(self, tmp_path):
+        with pytest.raises(ConfigError, match="history.max_mb debe ser int o float, no str"):
+            config.load_config(escribir(tmp_path, '[history]\nmax_mb = "5"\n'))
+
+    def test_history_max_mb_bool(self, tmp_path):
+        with pytest.raises(ConfigError, match="history.max_mb"):
+            config.load_config(escribir(tmp_path, "[history]\nmax_mb = true\n"))
+
+    def test_history_enabled_texto(self, tmp_path):
+        with pytest.raises(ConfigError, match="history.enabled debe ser bool, no str"):
+            config.load_config(escribir(tmp_path, '[history]\nenabled = "si"\n'))
+
+    def test_history_clave_desconocida(self, tmp_path):
+        with pytest.raises(ConfigError, match="clave desconocida history.path"):
+            config.load_config(escribir(tmp_path, '[history]\npath = "x"\n'))
 
     @pytest.mark.parametrize(
         "texto",
