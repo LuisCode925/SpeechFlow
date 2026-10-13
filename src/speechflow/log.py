@@ -1,4 +1,4 @@
-"""Configuración del log de consola: INFO a stdout, WARNING y ERROR a stderr."""
+"""Configuración del log: consola (stdout hasta INFO, stderr desde WARNING) y archivo rotativo, con niveles ajustables."""
 import logging
 import os
 import sys
@@ -14,6 +14,7 @@ FORMAT = "%(asctime)s.%(msecs)03d %(levelname)-7s %(message)s"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 LOG_MAX_BYTES = 1_048_576
 LOG_BACKUP_COUNT = 3
+_LEVELS = {"debug": logging.DEBUG, "info": logging.INFO, "warning": logging.WARNING, "error": logging.ERROR}
 
 BANNER_ART = r"""
 ________                       ______ _______________
@@ -58,8 +59,8 @@ def log_banner() -> None:
     print(flush=True)
 
 
-def setup_logging() -> logging.Logger:
-    """Configura y devuelve el logger `speechflow`; llamarla otra vez no duplica manejadores."""
+def setup_logging(console_level: str = "info") -> logging.Logger:
+    """Configura y devuelve el logger `speechflow`; llamarla otra vez no duplica manejadores ni cambia niveles."""
     logger = logging.getLogger(LOGGER_NAME)
     if logger.handlers:
         return logger
@@ -68,20 +69,33 @@ def setup_logging() -> logging.Logger:
     formatter.converter = time.localtime
 
     out = _FlushingStreamHandler("stdout")
-    out.setLevel(logging.INFO)
     out.addFilter(lambda record: record.levelno < logging.WARNING)
     out.setFormatter(formatter)
 
     err = _FlushingStreamHandler("stderr")
-    err.setLevel(logging.WARNING)
     err.setFormatter(formatter)
 
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)  # filtran los manejadores
     logger.addHandler(out)
     logger.addHandler(err)
     logger.propagate = False
     _add_file_handler(logger, formatter)
+    apply_log_levels(console_level, "info")
     return logger
+
+
+def apply_log_levels(console_level: str, file_level: str) -> None:
+    """Fija el nivel de la consola (stdout hasta INFO, stderr desde WARNING) y el del archivo."""
+    console = _LEVELS[console_level]
+    for handler in logging.getLogger(LOGGER_NAME).handlers:
+        if isinstance(handler, _FlushingStreamHandler):
+            if handler._stream_name == "stdout":
+                # el filtro de setup_logging corta en WARNING; con nivel >= WARNING no sale nada por stdout
+                handler.setLevel(console if console < logging.WARNING else logging.CRITICAL + 1)
+            else:
+                handler.setLevel(max(console, logging.WARNING))
+        elif isinstance(handler, RotatingFileHandler):
+            handler.setLevel(_LEVELS[file_level])
 
 
 def _add_file_handler(logger: logging.Logger, formatter: logging.Formatter) -> None:

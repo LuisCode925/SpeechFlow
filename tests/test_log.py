@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from speechflow import __version__, config, log
-from speechflow.log import log_banner, setup_logging
+from speechflow.log import apply_log_levels, log_banner, setup_logging
 
 
 @pytest.fixture(autouse=True)
@@ -68,6 +68,71 @@ def test_formato_warning_alinea_nivel(capsys):
 
 def test_no_propaga_al_root():
     assert setup_logging().propagate is False
+
+
+def emitir_todo(logger):
+    logger.debug("d")
+    logger.info("i")
+    logger.warning("w")
+    logger.error("e")
+
+
+@pytest.mark.parametrize(
+    "nivel, stdout, stderr",
+    [
+        ("debug", ["d", "i"], ["w", "e"]),
+        ("info", ["i"], ["w", "e"]),
+        ("warning", [], ["w", "e"]),
+        ("error", [], ["e"]),
+    ],
+)
+class TestNivelConsola:
+    def lineas(self, texto):
+        return [l.split(None, 3)[3] for l in texto.splitlines()]
+
+    def test_nivel_inicial(self, capsys, nivel, stdout, stderr):
+        emitir_todo(setup_logging(nivel))
+        captura = capsys.readouterr()
+        assert self.lineas(captura.out) == stdout and self.lineas(captura.err) == stderr
+
+    def test_apply_log_levels(self, capsys, nivel, stdout, stderr):
+        logger = setup_logging()
+        apply_log_levels(nivel, "info")
+        emitir_todo(logger)
+        captura = capsys.readouterr()
+        assert self.lineas(captura.out) == stdout and self.lineas(captura.err) == stderr
+
+
+class TestNivelArchivo:
+    def niveles_en_archivo(self):
+        return [l.split(None, 3)[3] for l in config.log_path().read_text(encoding="utf-8").splitlines()]
+
+    @pytest.mark.parametrize(
+        "nivel, esperado",
+        [("debug", ["d", "i", "w", "e"]), ("info", ["i", "w", "e"]), ("warning", ["w", "e"]), ("error", ["e"])],
+    )
+    def test_file_level(self, capsys, nivel, esperado):
+        logger = setup_logging()
+        apply_log_levels("info", nivel)
+        emitir_todo(logger)
+        assert self.niveles_en_archivo() == esperado
+
+    def test_independiente_de_la_consola(self, capsys):
+        logger = setup_logging("error")
+        emitir_todo(logger)
+        assert self.niveles_en_archivo() == ["i", "w", "e"]
+        captura = capsys.readouterr()
+        assert captura.out == "" and [l.split(None, 3)[3] for l in captura.err.splitlines()] == ["e"]
+
+    def test_consola_debug_no_cambia_el_archivo(self, capsys):
+        emitir_todo(setup_logging("debug"))
+        assert self.niveles_en_archivo() == ["i", "w", "e"]
+
+    def test_segunda_llamada_no_cambia_niveles(self, capsys):
+        logger = setup_logging("error")
+        setup_logging("debug")
+        emitir_todo(logger)
+        assert capsys.readouterr().out == ""
 
 
 def modo(ruta):
