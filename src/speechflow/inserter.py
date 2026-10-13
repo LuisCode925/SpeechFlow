@@ -1,5 +1,6 @@
 """Inserción de texto en la ventana con foco (X11): pegado por portapapeles (xclip) o tecleado con xdotool."""
 import logging
+import re
 import subprocess
 import time
 
@@ -67,13 +68,14 @@ def _read_clipboard() -> str | None:
     return out.decode("utf-8", errors="replace") or None if isinstance(out, bytes) else None
 
 
-def _focused_class() -> str:
-    """Clase de la ventana con foco en minúsculas; vacía si no se puede averiguar."""
+def _focused_classes() -> set[str]:
+    """Instancia y clase (WM_CLASS) de la ventana con foco en minúsculas; vacío si no se pueden averiguar."""
     try:
-        out = _run(["xdotool", "getwindowfocus", "getwindowclassname"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout
-    except _ClipboardError:
-        return ""
-    return out.decode("utf-8", errors="replace").strip().lower() if isinstance(out, bytes) else ""
+        window = _run(["xdotool", "getwindowfocus"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout
+        out = _run(["xprop", "-id", window.decode().strip(), "WM_CLASS"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout
+    except (_ClipboardError, AttributeError, UnicodeDecodeError):
+        return set()
+    return {name.lower() for name in re.findall(r'"([^"]+)"', out.decode("utf-8", errors="replace"))} if isinstance(out, bytes) else set()
 
 
 def _paste(text: str, extra_terminals: tuple[str, ...]) -> None:
@@ -81,7 +83,7 @@ def _paste(text: str, extra_terminals: tuple[str, ...]) -> None:
     try:
         _write_clipboard(text)
         terminals = TERMINAL_CLASSES | {c.lower() for c in extra_terminals}
-        shortcut = "ctrl+shift+v" if _focused_class() in terminals else "ctrl+v"
+        shortcut = "ctrl+shift+v" if _focused_classes() & terminals else "ctrl+v"
         _run(["xdotool", "key", "--clearmodifiers", shortcut])
     except _ClipboardError:
         _restore(previous)

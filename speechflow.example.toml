@@ -30,6 +30,8 @@
 
 [text]
 # punctuation_commands = true   # sustituye "punto", "coma", "nueva línea"... por su signo (es/en) y pone mayúscula inicial; false inserta lo que transcribe Whisper
+# insert_method = "clipboard"   # "clipboard": copia y pega con Ctrl+V (Ctrl+Shift+V en terminales) y restaura el portapapeles; "type": teclea con xdotool
+# terminal_classes = []         # clases de ventana extra que se pegan con Ctrl+Shift+V; ver: xprop -id $(xdotool getwindowfocus) WM_CLASS
 
 [log]
 # level = "info"         # nivel de la consola: "debug", "info", "warning" o "error"; --quiet, --verbose y --log-level ganan

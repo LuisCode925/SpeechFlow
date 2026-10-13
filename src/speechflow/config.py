@@ -212,7 +212,7 @@ def _emergency_template() -> str:
         "[text]\n"
         f'punctuation_commands = {str(d.punctuation_commands).lower()}  # sustituye "punto", "coma", "nueva línea"... por su signo; false inserta lo que transcribe Whisper\n'
         f"insert_method = {json.dumps(d.insert_method)}  # \"clipboard\": copia y pega con Ctrl+V (Ctrl+Shift+V en terminales) y restaura el portapapeles; \"type\": teclea con xdotool\n"
-        "# terminal_classes = []  # clases de ventana extra que se pegan con Ctrl+Shift+V; ver: xdotool getwindowfocus getwindowclassname\n"
+        "# terminal_classes = []  # clases de ventana extra que se pegan con Ctrl+Shift+V; ver: xprop -id $(xdotool getwindowfocus) WM_CLASS\n"
         "\n"
         "[log]\n"
         f"level = {json.dumps(d.log_level)}  # nivel de la consola: \"debug\", \"info\", \"warning\" o \"error\"; --quiet, --verbose y --log-level ganan\n"

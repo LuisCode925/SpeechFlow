@@ -36,16 +36,18 @@ def test_propaga_el_error_de_xdotool(monkeypatch):
 
 READ = ["xclip", "-selection", "clipboard", "-o", "-t", "UTF8_STRING"]
 WRITE = ["xclip", "-selection", "clipboard", "-i", "-t", "UTF8_STRING"]
-CLASE = ["xdotool", "getwindowfocus", "getwindowclassname"]
+FOCO = ["xdotool", "getwindowfocus"]
+CLASE = ["xprop", "-id", "4242", "WM_CLASS"]
 
 
 class Escenario:
     """Doble de subprocess.run y time.sleep que registra el orden de las llamadas."""
 
-    def __init__(self, monkeypatch, previo="viejo", clase="firefox", fallos=()):
+    def __init__(self, monkeypatch, previo="viejo", clase="firefox", instancia=None, fallos=()):
         self.eventos = []
         self.previo = previo
         self.clase = clase
+        self.instancia = instancia or clase
         self.fallos = fallos  # comandos (listas) que lanzan CalledProcessError o la excepción dada
         self.kwargs = {}
         monkeypatch.setattr(subprocess, "run", self.run)
@@ -60,8 +62,11 @@ class Escenario:
                 raise error
         if cmd == READ:
             return subprocess.CompletedProcess(cmd, 0, stdout=(self.previo or "").encode())
+        if cmd == FOCO:
+            return subprocess.CompletedProcess(cmd, 0, stdout=b"4242\n")
         if cmd == CLASE:
-            return subprocess.CompletedProcess(cmd, 0, stdout=(self.clase + "\n").encode())
+            salida = f'WM_CLASS(STRING) = "{self.instancia}", "{self.clase}"\n'
+            return subprocess.CompletedProcess(cmd, 0, stdout=salida.encode())
         return subprocess.CompletedProcess(cmd, 0)
 
     def comandos(self):
@@ -72,7 +77,7 @@ def test_clipboard_secuencia_completa(monkeypatch):
     e = Escenario(monkeypatch)
     insert_text("¿Cómo estás? ñandú")
     assert e.comandos() == [
-        READ, WRITE, CLASE,
+        READ, WRITE, FOCO, CLASE,
         ["xdotool", "key", "--clearmodifiers", "ctrl+v"],
         ("sleep", inserter.PASTE_DELAY),
         WRITE,
@@ -119,6 +124,27 @@ def test_terminal_pega_con_ctrl_shift_v(monkeypatch, clase):
     assert ["xdotool", "key", "--clearmodifiers", "ctrl+shift+v"] in e.comandos()
 
 
+def test_coincide_por_instancia_o_por_clase(monkeypatch):
+    e = Escenario(monkeypatch, instancia="kitty", clase="otra")
+    insert_text("hola")
+    assert ["xdotool", "key", "--clearmodifiers", "ctrl+shift+v"] in e.comandos()
+
+
+def test_xprop_sin_wm_class_usa_ctrl_v(monkeypatch):
+    e = Escenario(monkeypatch)
+    run = e.run
+
+    def sin_clase(cmd, **kw):
+        if cmd == CLASE:
+            e.eventos.append(("run", cmd))
+            return subprocess.CompletedProcess(cmd, 0, stdout=b"WM_CLASS:  not found.\n")
+        return run(cmd, **kw)
+
+    monkeypatch.setattr(subprocess, "run", sin_clase)
+    insert_text("hola")
+    assert ["xdotool", "key", "--clearmodifiers", "ctrl+v"] in e.comandos()
+
+
 def test_extra_terminals_sin_distinguir_mayusculas(monkeypatch):
     e = Escenario(monkeypatch, clase="MyTerm")
     insert_text("hola", extra_terminals=("myterm",))
@@ -131,8 +157,9 @@ def test_clase_desconocida_pega_con_ctrl_v(monkeypatch):
     assert ["xdotool", "key", "--clearmodifiers", "ctrl+v"] in e.comandos()
 
 
-def test_fallo_de_getwindowclassname_usa_ctrl_v(monkeypatch):
-    e = Escenario(monkeypatch, fallos=[CLASE])
+@pytest.mark.parametrize("fallo", [FOCO, CLASE])
+def test_fallo_al_averiguar_la_clase_usa_ctrl_v(monkeypatch, fallo):
+    e = Escenario(monkeypatch, clase="kitty", fallos=[fallo])
     insert_text("hola")
     assert ["xdotool", "key", "--clearmodifiers", "ctrl+v"] in e.comandos()
     assert not any(c[:2] == ["xdotool", "type"] for c in e.comandos() if isinstance(c, list))

@@ -1,6 +1,6 @@
 # SPEC 25 — Inserción por portapapeles (Ctrl+V)
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 05, SPEC 10, SPEC 16, SPEC 21, SPEC 24
 > **Fecha:** 2026-10-12
 > **Objetivo:** Insertar el texto dictado copiándolo al portapapeles y pegándolo con Ctrl+V (Ctrl+Shift+V en terminales) en lugar de teclearlo con `xdotool type`, y restaurar después el texto que había en el portapapeles.
@@ -18,7 +18,7 @@
   - `method="clipboard"`, con el texto no vacío, en este orden:
     1. Lee el contenido previo del portapapeles: `xclip -selection clipboard -o -t UTF8_STRING`. Si falla o está vacío, no hay nada que restaurar (`previo = None`).
     2. Escribe el dictado: `xclip -selection clipboard -i -t UTF8_STRING` con el texto por `stdin` (con `stdout` y `stderr` a `DEVNULL`, porque `xclip` deja un proceso en segundo plano que mantiene la selección).
-    3. Lee la clase de la ventana con foco: `xdotool getwindowfocus getwindowclassname`. Si su minúscula está en `TERMINAL_CLASSES` o en `extra_terminals` (también en minúsculas), el atajo es `ctrl+shift+v`; en otro caso, `ctrl+v`. Si el comando falla, se asume que no es terminal.
+    3. Lee `WM_CLASS` (instancia y clase) de la ventana con foco: `xdotool getwindowfocus` da su id y `xprop -id <id> WM_CLASS` los nombres. Si alguno, en minúsculas, está en `TERMINAL_CLASSES` o en `extra_terminals` (también en minúsculas), el atajo es `ctrl+shift+v`; en otro caso, `ctrl+v`. Si algún comando falla o no hay `WM_CLASS`, se asume que no es terminal.
     4. Pega: `xdotool key --clearmodifiers <atajo>`.
     5. Espera `PASTE_DELAY` (0,3 s) para que la aplicación destino lea el portapapeles.
     6. Si `previo` no es `None`, lo vuelve a escribir con `xclip -selection clipboard -i -t UTF8_STRING`.
@@ -44,7 +44,7 @@
 - Tocar o restaurar la selección `PRIMARY`.
 - Interacción con gestores de historial del portapapeles (pueden registrar el dictado y el contenido restaurado).
 - Opción de CLI para el método de inserción o tecla para cambiarlo en caliente.
-- Detectar el terminal por otro medio que la clase de la ventana (`xprop`, título, proceso).
+- Detectar el terminal por otro medio que la clase de la ventana (título, proceso).
 - Retardo de pegado configurable por TOML (queda como constante).
 - Cambiar `punctuation.py`: el texto con `\n` se pega tal cual.
 - Cambios en `transcriber.py`, `notifier.py`, `audio.py` y `scripts/`.
@@ -72,7 +72,7 @@ class Config:
 ```toml
 [text]
 # insert_method = "clipboard"   # "clipboard": copia y pega con Ctrl+V (Ctrl+Shift+V en terminales) y restaura el portapapeles; "type": teclea con xdotool
-# terminal_classes = []         # clases de ventana extra que se pegan con Ctrl+Shift+V; ver: xdotool getwindowfocus getwindowclassname
+# terminal_classes = []         # clases de ventana extra que se pegan con Ctrl+Shift+V; ver: xprop -id $(xdotool getwindowfocus) WM_CLASS
 ```
 
 Convenciones:
@@ -87,7 +87,7 @@ Convenciones:
 ## Plan de implementación
 
 1. En `config.py`, añadir `INSERT_METHODS`, `Config.insert_method`, `Config.terminal_classes`, las entradas de `_SCHEMA["text"]` (incluida la validación de lista de textos no vacíos) y las líneas de la plantilla de `write_emergency`. Tests en `tests/test_config.py` (defectos `"clipboard"` y `()`, `"type"` válido, `"paste"` inválido con `text.insert_method`, lista válida, elemento no textual o vacío inválido con `text.terminal_classes`, tipo incorrecto, plantilla de emergencia da `Config()`). Verificar: `pytest tests/test_config.py` pasa.
-2. En `inserter.py`, añadir las constantes, el parámetro `method`, el flujo de portapapeles con restauración, la detección de terminal y el respaldo a `xdotool type`. Tests en `tests/test_inserter.py` con `subprocess.run` y `time.sleep` falsos que registran las llamadas en orden: con `method="type"` no se llama a `xclip` (los tests actuales de `xdotool type` siguen valiendo pasando `method="type"`); texto vacío no ejecuta nada; secuencia leer → escribir → clase → `ctrl+v` → espera → restaurar; `ctrl+shift+v` con clase de `TERMINAL_CLASSES` y con `extra_terminals` (sin distinguir mayúsculas); fallo de `getwindowclassname` usa `ctrl+v`; portapapeles previo vacío o ilegible no se restaura; fallo de `xclip` o `xdotool key` restaura y teclea con `type` con el `WARNING`; texto que parece opción va tras `--` en el respaldo. Verificar: `pytest tests/test_inserter.py` pasa.
+2. En `inserter.py`, añadir las constantes, el parámetro `method`, el flujo de portapapeles con restauración, la detección de terminal y el respaldo a `xdotool type`. Tests en `tests/test_inserter.py` con `subprocess.run` y `time.sleep` falsos que registran las llamadas en orden: con `method="type"` no se llama a `xclip` (los tests actuales de `xdotool type` siguen valiendo pasando `method="type"`); texto vacío no ejecuta nada; secuencia leer → escribir → clase → `ctrl+v` → espera → restaurar; `ctrl+shift+v` con clase de `TERMINAL_CLASSES` y con `extra_terminals` (sin distinguir mayúsculas); fallo de `xdotool getwindowfocus` o `xprop` usa `ctrl+v`; portapapeles previo vacío o ilegible no se restaura; fallo de `xclip` o `xdotool key` restaura y teclea con `type` con el `WARNING`; texto que parece opción va tras `--` en el respaldo. Verificar: `pytest tests/test_inserter.py` pasa.
 3. En `app.py`, pasar `insert_method` y `terminal_classes` desde `Config` hasta `PushToTalk` y `insert_text`, y añadir la comprobación de arranque de `xclip`. Tests en `tests/test_app_helpers.py` y `tests/test_push_to_talk.py` (la configuración llega a `insert_text`; sin `xclip` y con `"clipboard"` sale con código 1 y el `ERROR`; con `"type"` no se exige). Verificar: `pytest` pasa.
 4. Documentar en `speechflow.example.toml` y `README.md`: requisito `xclip`, descripción actual de `inserter.py`, las dos claves, la limitación (aplicaciones que leen el portapapeles tarde pueden pegar el contenido restaurado; el portapapeles previo no textual se pierde; los gestores de historial ven el dictado), cómo averiguar la clase de una ventana y cómo volver a `type`. Actualizar la nota de `nueva línea` / `nuevo párrafo` (con portapapeles se pega un salto de línea, no se teclea `Return`; en un chat puede no enviar el mensaje). Marcar el elemento 5 de `TODO.md`. Verificar: el README coincide con el comportamiento real.
 5. Prueba manual en X11: dictar con acentos y símbolos (`¿Cómo estás? ñandú`) en un editor, en un navegador y en una terminal; comprobar que el portapapeles previo de texto se restaura y que con `insert_method = "type"` todo funciona como antes.
@@ -105,7 +105,7 @@ Convenciones:
 - [ ] En modo portapapeles, las llamadas ocurren en este orden: leer portapapeles, escribir texto, leer clase de ventana, `xdotool key --clearmodifiers ctrl+v`, espera `PASTE_DELAY`, restaurar.
 - [ ] Con la clase `gnome-terminal` (o cualquiera de `TERMINAL_CLASSES`, en cualquier capitalización) el atajo es `ctrl+shift+v`.
 - [ ] Con una clase de `extra_terminals` el atajo es `ctrl+shift+v`; con otra clase, `ctrl+v`.
-- [ ] Si `getwindowclassname` falla, se pega con `ctrl+v`.
+- [ ] Si `xdotool getwindowfocus` o `xprop` fallan, o no hay `WM_CLASS`, se pega con `ctrl+v`.
 - [ ] El texto se pasa a `xclip` por `stdin` y nunca como argumento de línea de comandos.
 - [ ] Con el portapapeles previo vacío o ilegible, no se vuelve a escribir nada tras el pegado.
 - [ ] Si falla `xclip` o `xdotool key`, se restaura el portapapeles (si se había leído), se registra el `WARNING` `Portapapeles no disponible (...)` y se inserta con `xdotool type`.
@@ -130,7 +130,7 @@ Convenciones:
 - **Sí:** detectar la ventana con foco y usar `ctrl+shift+v` en terminales, por elección del usuario. Ctrl+V no pega en la mayoría de las terminales, y sin esto el modo por defecto fallaría justo donde más se usa.
 - **Sí:** lista `TERMINAL_CLASSES` en el código más `[text] terminal_classes` que se suma, por elección del usuario. Cubre las terminales comunes y permite añadir una nueva sin tocar el código.
 - **No:** lista completa solo por TOML o solo en el código. La primera obliga al usuario a mantenerla; la segunda exige editar el código para cada terminal nueva.
-- **Sí:** `xdotool getwindowfocus getwindowclassname`, por elección del usuario. `xdotool` ya es obligatorio; `xprop` añadiría una dependencia (`x11-utils`) y un parseo.
+- **Sí:** `xdotool getwindowfocus` más `xprop -id <id> WM_CLASS`, por elección del usuario (enmienda tras la prueba manual). `xdotool getwindowclassname` no existe en `xdotool` 3.20160805 (la versión del equipo) y las terminales dejaban de pegar. `xprop` (paquete `x11-utils`) es dependencia opcional: sin él se pega siempre con `ctrl+v`.
 - **Sí:** si falta `xclip` con `"clipboard"`, `ERROR` y salida con código 1, por elección del usuario. Es el mismo trato que `xdotool` ausente, y evita que el usuario crea que usa el portapapeles cuando no es así.
 - **Sí:** solo `CLIPBOARD`, por elección del usuario. Es la selección que usan los atajos de pegado; `PRIMARY` es del usuario (texto seleccionado) y no debe pisarse.
 - **Sí:** respaldo automático a `xdotool type` con `WARNING`. Decisión del diseño: un dictado perdido es peor que uno tecleado de forma menos robusta.
@@ -148,7 +148,7 @@ Convenciones:
 | `xclip` mantiene abierto un proceso en segundo plano y `subprocess.run` se cuelga esperando los flujos | `stdout` y `stderr` a `DEVNULL` y `COMMAND_TIMEOUT` en cada llamada; test con dobles que lo verifican. |
 | El portapapeles previo no era texto y se pierde | Es el comportamiento acordado y se documenta. |
 | Aplicaciones que ignoran `Ctrl+V` o bloquean el pegado (algunos campos de contraseña, algunas VM) | `insert_method = "type"`; el `WARNING` solo salta si falla un comando, no si el pegado no tiene efecto. |
-| `getwindowclassname` devuelve vacío en algunas ventanas | Se trata como no terminal (`ctrl+v`). |
+| `xprop` ausente o la ventana sin `WM_CLASS` | Se trata como no terminal (`ctrl+v`); el README indica instalar `x11-utils`. |
 | Los dobles de `subprocess.run` no reflejan el comportamiento real de `xclip` | Prueba manual del paso 5 con `xclip` y `xdotool` reales. |
 
 ## Lo que **no** está en esta spec
