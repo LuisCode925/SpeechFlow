@@ -22,7 +22,7 @@ Diferencias técnicas de los archivos
 ## Requisitos
 
 - Debian 13 con X11.
-- GPU NVIDIA con driver compatible con CUDA 12 (probado con GTX 1060 6 GB y driver 550.163.01).
+- GPU NVIDIA con driver compatible con CUDA 12 (probado con GTX 1060 6 GB y driver 550.163.01). Es opcional: sin GPU, o con un driver roto, funciona solo en CPU (ver [Modo solo CPU](#modo-solo-cpu)).
 - [Conda](https://docs.conda.io/) (miniconda o similar).
 - Para el push-to-talk, paquetes de sistema: `sudo apt install xdotool libnotify-bin` (`xdotool` es obligatorio; `libnotify-bin` aporta `notify-send` y es opcional).
 
@@ -65,7 +65,7 @@ La primera ejecución descarga los modelos desde Hugging Face (`medium` pesa ~1.
 
 ## Módulo de transcripción
 
-`src/speechflow/transcriber.py` define `Transcriber`, que carga `faster-whisper` una sola vez (GPU, `int8`), hace un calentamiento y transcribe cuantas veces se quiera sin recargar el modelo.
+`src/speechflow/transcriber.py` define `Transcriber`, que carga `faster-whisper` una sola vez (`int8`; GPU o CPU según `device`, ver [Modo solo CPU](#modo-solo-cpu)), hace un calentamiento y transcribe cuantas veces se quiera sin recargar el modelo.
 
 ```python
 import wave
@@ -168,6 +168,7 @@ Opciones:
 | `--language` | Idioma de la transcripción: `es`, `en`, otro idioma de Whisper, o `auto` (detecta entre `es` y `en` en cada dictado). | `es` |
 | `--key` | Tecla de disparo: nombre de `pynput.keyboard.Key` (`ctrl_r`, `f9`, ...) o un carácter suelto. Falla con un mensaje claro si no existe. | `ctrl_r` |
 | `--switch-key` | Tecla de cambio de entrada de audio, mismo formato que `--key`. Debe ser distinta de `--key`; si no, el script sale con código 1. | `f8` |
+| `--compute-device` | Dispositivo de Whisper: `auto` (GPU si funciona, si no CPU), `cpu` o `cuda`. Gana sobre `[model] device`. Ver [Modo solo CPU](#modo-solo-cpu). | `auto` |
 | `--config` | Archivo de configuración TOML. Si no existe, el script sale con código 1. | `$XDG_CONFIG_HOME/speechflow/config.toml` (`~/.config/speechflow/config.toml`) |
 
 Un argumento escrito en la línea de comandos gana sobre el archivo de configuración (ver [Configuración](#configuración)).
@@ -225,6 +226,30 @@ Ejemplo: dictar "hola coma mundo punto" inserta `Hola, mundo.`.
 2026-10-09 10:15:03.222 INFO    Insertado (0.42 s, 0.12x tiempo real, 12 caracteres, medium/es): Hola, mundo.
 ```
 
+## Modo solo CPU
+
+Whisper puede ejecutarse sin GPU. La clave `[model] device` y la opción `--compute-device` (que gana sobre el TOML) aceptan:
+
+| Valor | Comportamiento |
+| ----- | -------------- |
+| `auto` (defecto) | Usa la GPU si `ctranslate2.get_cuda_device_count()` es mayor que 0 y el modelo carga. Si no hay GPU, o la carga o el calentamiento fallan, libera lo cargado y reintenta en CPU con un `WARNING` que da el motivo, y envía la notificación `Sin GPU utilizable: se usa la CPU`. |
+| `cpu` | Solo CPU, sin consultar CUDA. |
+| `cuda` | Solo GPU. Si falla, el script sale con código 1 y un `ERROR` que sugiere `--compute-device cpu`; no cae a CPU. |
+
+- **Hilos:** `[model] cpu_threads` (entero, `0` por defecto) fija los hilos de CPU de Whisper; `0` deja el valor por defecto de `faster-whisper`. Solo cuenta cuando el dispositivo resuelto es CPU; un valor negativo hace inválido el archivo.
+- **Tipo de cómputo:** `int8` en CPU y en GPU.
+- **Log:** muestra el dispositivo real (`Cargando medium (int8, CPU)...`, `Modelo: medium | ... | CPU | ...`).
+- **Lentitud:** con CPU y un modelo `medium` o mayor se registra un `WARNING` de que la transcripción será lenta y se sugiere `small` (`--model small`). El modelo por defecto no cambia.
+- **Recargas:** tras la liberación por inactividad (`idle_timeout`) el modelo se recarga en el dispositivo ya resuelto, así que no se vuelve a intentar una GPU que falló.
+- **Reinicio:** `device` y `cpu_threads` se leen solo al arrancar.
+- **Entorno:** `environment.yml` no cambia; cuBLAS y cuDNN se instalan aunque en CPU no se usen.
+- **Límite:** un fallo nativo del driver que aborte el proceso no se puede capturar; en ese caso usa `--compute-device cpu` o `CUDA_VISIBLE_DEVICES=""`.
+
+```bash
+speechflow --compute-device cpu --model small
+CUDA_VISIBLE_DEVICES="" speechflow --compute-device cpu
+```
+
 ## Configuración
 
 La app de push-to-talk lee un archivo TOML opcional (solo ella; `capture_mic.py`, `benchmark_stt.py` y `--list-devices` no lo usan). Se usa el primero que exista, sin fusionar:
@@ -252,6 +277,8 @@ Las carpetas se crean al escribir la plantilla, el estado o el log. Un `speechfl
 name = "medium"
 language = "es"                # "es", "en", otro idioma de Whisper, o "auto" (detecta entre es y en en cada dictado)
 idle_timeout = 0.0          # segundos sin dictar antes de liberar el modelo de la GPU; 0 desactiva; mínimo 30.0
+device = "auto"             # "auto": GPU si hay y funciona, si no CPU; "cpu": solo CPU; "cuda": solo GPU (falla si no hay)
+cpu_threads = 0             # hilos de CPU para Whisper; 0 usa el defecto de faster-whisper
 vad = true                  # filtra silencios y ruido sin voz antes de transcribir; false desactiva
 
 [keys]
@@ -278,7 +305,7 @@ punctuation_commands = true # sustituye "punto", "coma", "nueva línea"... por s
 
 **Precedencia por valor:** argumento de CLI (solo si se escribió) > estado guardado (solo dispositivo e idioma) > archivo > defectos. En concreto, el dispositivo es `--device` > `state.toml` > `[audio] device` > el que contenga "Realtek", si no el del sistema, y el idioma es `--language` > `state.toml` > `[model] language` > `es`.
 
-**Validación:** una clave o sección desconocida, un tipo incorrecto, `min_seconds <= 0` o `max_seconds <= min_seconds` o `watch_interval < 1.0`, un `idle_timeout` distinto de 0 y menor que 30.0, un `mode` que no sea `"hold"` ni `"toggle"`, o un `punctuation_commands` que no sea `true` ni `false` (por ejemplo `"si"`) hacen inválido el archivo. Las teclas se siguen validando al arrancar con mensajes `ERROR` que nombran la clave (`--key`, `--switch-key`, `[keys] language`, `[keys] auto`); si dos de las cuatro coinciden, el script sale con código 1 y nombra las dos.
+**Validación:** una clave o sección desconocida, un tipo incorrecto, `min_seconds <= 0` o `max_seconds <= min_seconds` o `watch_interval < 1.0`, un `idle_timeout` distinto de 0 y menor que 30.0, un `device` que no sea `"auto"`, `"cpu"` ni `"cuda"` (el error nombra `model.device`), un `cpu_threads` negativo (nombra `model.cpu_threads`), un `mode` que no sea `"hold"` ni `"toggle"`, o un `punctuation_commands` que no sea `true` ni `false` (por ejemplo `"si"`) hacen inválido el archivo. Las teclas se siguen validando al arrancar con mensajes `ERROR` que nombran la clave (`--key`, `--switch-key`, `[keys] language`, `[keys] auto`); si dos de las cuatro coinciden, el script sale con código 1 y nombra las dos.
 
 **Archivo de emergencia:** si no se encuentra ningún archivo, o el encontrado no se puede leer o no es válido, el script registra un `WARNING` con la causa, crea `config.emergency.toml` junto al archivo de configuración con todos los valores por defecto (sin sobrescribirlo si ya existe) y sigue con los defectos. El archivo inválido del usuario no se toca. La plantilla de emergencia no se lee nunca: cópiala o renómbrala a `config.toml` para usarla.
 

@@ -1,6 +1,6 @@
 # SPEC 22 — Modo solo CPU
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 04, SPEC 10, SPEC 12, SPEC 16
 > **Fecha:** 2026-10-12
 > **Objetivo:** Añadir la clave `[model] device` (`auto`, `cpu` o `cuda`) y `[model] cpu_threads` para que `Transcriber` pueda ejecutar Whisper solo en CPU, y que `auto` caiga a CPU con aviso cuando no haya GPU utilizable.

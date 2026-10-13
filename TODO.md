@@ -36,7 +36,7 @@ Base para la GUI:
 
 - [ ] 9. Daemon y servicio `systemd` de usuario (la GUI o bandeja será cliente del proceso).
 - [ ] 10. Canal de control (socket Unix o señales): pausar, cambiar idioma o dispositivo, consultar estado. Es la dependencia real de la GUI.
-- [ ] 11. Fallback a CPU si falla CUDA, para que el servicio no muera al arrancar.
+- [x] ~~11. Fallback a CPU si falla CUDA, para que el servicio no muera al arrancar.~~ (SPEC 22, `[model] device = "auto"`)
 
 Pueden esperar: soporte Wayland y reducción de ruido.
 
@@ -56,7 +56,8 @@ Pueden esperar: soporte Wayland y reducción de ruido.
 
 - [x] ~~Detección automática de idioma (SPEC 04).~~ (SPEC 19, restringida a es/en)
 - [x] ~~Cambio de idioma en caliente (SPEC 05).~~ (SPEC 19)
-- [ ] Fallback a CPU o a la nube (SPEC 01).
+- [x] ~~Fallback a CPU (SPEC 01).~~ (SPEC 22)
+- [ ] Fallback a la nube (SPEC 01).
 - [ ] Más modelos o compute types en el benchmark, y audios largos (SPEC 02).
 - [ ] Medición de WER (SPEC 02, 03, 04, 05).
 

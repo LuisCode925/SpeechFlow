@@ -6,6 +6,8 @@
 # name = "medium"
 # language = "es"        # "es", "en", otro idioma de Whisper, o "auto" (detecta entre es y en en cada dictado)
 # idle_timeout = 0.0     # segundos sin dictar antes de liberar el modelo de la GPU; 0 desactiva; mínimo 30.0
+# device = "auto"        # "auto": GPU si hay y funciona, si no CPU; "cpu": solo CPU; "cuda": solo GPU (falla si no hay)
+# cpu_threads = 0        # hilos de CPU para Whisper; 0 usa el defecto de faster-whisper
 # vad = true             # filtra silencios y ruido sin voz antes de transcribir; false desactiva
 
 [keys]
