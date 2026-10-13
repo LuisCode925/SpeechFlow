@@ -93,6 +93,19 @@ class TestLoadConfig:
     def test_archivo_vacio_da_defectos(self, tmp_path):
         assert config.load_config(escribir(tmp_path, "")) == Config()
 
+    def test_modelo_sin_fijar_es_none(self, tmp_path):
+        assert Config().model is None
+        assert config.load_config(escribir(tmp_path, "[model]\nvad = true\n")).model is None
+
+    @pytest.mark.parametrize("valor", ["small", "medium"])
+    def test_nombre_de_modelo_valido(self, tmp_path, valor):
+        assert config.load_config(escribir(tmp_path, f'[model]\nname = "{valor}"\n')).model == valor
+
+    @pytest.mark.parametrize("valor", ["", "   "])
+    def test_nombre_de_modelo_vacio_es_invalido(self, tmp_path, valor):
+        with pytest.raises(ConfigError, match="model.name"):
+            config.load_config(escribir(tmp_path, f'[model]\nname = "{valor}"\n'))
+
     def test_valido_completo(self, tmp_path):
         ruta = escribir(
             tmp_path,

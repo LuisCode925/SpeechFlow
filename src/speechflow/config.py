@@ -6,14 +6,14 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from speechflow.transcriber import DEFAULT_LANGUAGE, DEFAULT_MODEL
+from speechflow.transcriber import DEFAULT_LANGUAGE
 
 logger = logging.getLogger("speechflow")
 
 
 @dataclass(frozen=True)
 class Config:
-    model: str = DEFAULT_MODEL
+    model: str | None = None  # [model] name; None = sin fijar (medium en GPU, small en CPU)
     language: str = DEFAULT_LANGUAGE
     key: str = "ctrl_r"
     switch_key: str = "f8"
@@ -137,6 +137,8 @@ def load_config(path: Path) -> Config:
             values[field] = float(value) if field in ("min_seconds", "max_seconds", "watch_interval", "idle_timeout") else value
 
     config = Config(**values)
+    if config.model is not None and not config.model.strip():
+        raise ConfigError("model.name no puede estar vacío")
     if config.min_seconds <= 0:
         raise ConfigError(f"recording.min_seconds debe ser mayor que 0, no {config.min_seconds}")
     if config.max_seconds <= config.min_seconds:
@@ -162,7 +164,7 @@ def _emergency_template() -> str:
         "# config.emergency.toml — plantilla con los valores por defecto.\n"
         "# El script no la lee: cópiala o renómbrala a config.toml para usarla.\n"
         "[model]\n"
-        f"name = {json.dumps(d.model)}\n"
+        '# name = "medium"  # sin fijar: medium en GPU, small en CPU\n'
         f"language = {json.dumps(d.language)}\n"
         f"idle_timeout = {d.idle_timeout}  # segundos sin dictar antes de liberar el modelo; 0 desactiva; mínimo 30.0\n"
         f"vad = {str(d.vad).lower()}  # filtra silencios y ruido sin voz antes de transcribir; false desactiva\n"
