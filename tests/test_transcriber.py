@@ -31,15 +31,35 @@ class WhisperModelFalso:
         return self.probabilidades[0][0], self.probabilidades[0][1], self.probabilidades
 
 
+class CTranslate2Falso:
+    """Sustituye al módulo ctranslate2: cuenta GPUs y registra las consultas."""
+
+    def __init__(self, gpus=1):
+        self.gpus = gpus
+        self.consultas = 0
+
+    def get_cuda_device_count(self):
+        self.consultas += 1
+        return self.gpus
+
+
 @pytest.fixture
-def modelo(monkeypatch):
+def ct2(monkeypatch):
+    falso = CTranslate2Falso()
+    monkeypatch.setattr(transcriber, "ctranslate2", falso)
+    return falso
+
+
+@pytest.fixture
+def modelo(monkeypatch, ct2):
     WhisperModelFalso.instancias = []
     monkeypatch.setattr(transcriber, "WhisperModel", WhisperModelFalso)
     return WhisperModelFalso
 
 
 def test_carga_el_modelo_en_gpu_y_lo_calienta(modelo):
-    Transcriber("small", "en")
+    t = Transcriber("small", "en")
+    assert t.device == "cuda"
     (falso,) = modelo.instancias
     assert falso.nombre == "small"
     assert falso.kwargs == {"device": "cuda", "compute_type": "int8"}
@@ -198,3 +218,73 @@ def test_audio_vacio_actualiza_last_language_sin_detectar(modelo):
     t = Transcriber(language="auto")
     assert t.transcribe(np.zeros((0, 1), dtype=np.int16)) == ("", 0.0)
     assert t.last_language == "es" and len(modelo.instancias[0].detecciones) == 1  # solo el calentamiento
+
+
+def fallar_en(monkeypatch, dispositivo):
+    """WhisperModel lanza RuntimeError al crearse en `dispositivo`."""
+    original = WhisperModelFalso.__init__
+
+    def init(self, nombre, **kwargs):
+        if kwargs.get("device") == dispositivo:
+            raise RuntimeError("CUDA driver roto")
+        original(self, nombre, **kwargs)
+
+    monkeypatch.setattr(WhisperModelFalso, "__init__", init)
+
+
+class TestDispositivo:
+    def test_cpu_no_consulta_cuda_y_pasa_hilos(self, modelo, ct2):
+        t = Transcriber("small", "es", device="cpu", cpu_threads=4)
+        (falso,) = modelo.instancias
+        assert falso.kwargs == {"device": "cpu", "compute_type": "int8", "cpu_threads": 4}
+        assert t.device == "cpu" and ct2.consultas == 0
+
+    def test_cpu_con_cero_hilos_no_pasa_cpu_threads(self, modelo):
+        Transcriber("small", "es", device="cpu")
+        assert modelo.instancias[0].kwargs == {"device": "cpu", "compute_type": "int8"}
+
+    def test_cuda_no_pasa_cpu_threads(self, modelo):
+        Transcriber("small", "es", device="cuda", cpu_threads=4)
+        assert modelo.instancias[0].kwargs == {"device": "cuda", "compute_type": "int8"}
+
+    def test_cuda_con_fallo_propaga_y_no_reintenta(self, modelo, monkeypatch):
+        fallar_en(monkeypatch, "cuda")
+        with pytest.raises(RuntimeError, match="driver roto"):
+            Transcriber("small", "es", device="cuda")
+        assert modelo.instancias == []
+
+    def test_auto_sin_gpu_usa_cpu(self, modelo, ct2, caplog):
+        ct2.gpus = 0
+        with caplog.at_level("WARNING", logger="speechflow"):
+            t = Transcriber("small", "es", cpu_threads=2)
+        assert t.device == "cpu"
+        assert modelo.instancias[0].kwargs == {"device": "cpu", "compute_type": "int8", "cpu_threads": 2}
+        assert any(r.levelname == "WARNING" for r in caplog.records)
+
+    def test_auto_con_gpu_usa_cuda(self, modelo):
+        t = Transcriber("small", "es")
+        assert t.device == "cuda" and modelo.instancias[0].kwargs["device"] == "cuda"
+
+    def test_auto_con_fallo_de_carga_reintenta_en_cpu(self, modelo, monkeypatch, caplog):
+        fallar_en(monkeypatch, "cuda")
+        with caplog.at_level("WARNING", logger="speechflow"):
+            t = Transcriber("small", "es", cpu_threads=3)
+        assert t.device == "cpu"
+        assert modelo.instancias[0].kwargs == {"device": "cpu", "compute_type": "int8", "cpu_threads": 3}
+        assert any("driver roto" in r.getMessage() and r.levelname == "WARNING" for r in caplog.records)
+
+    def test_auto_con_fallo_de_calentamiento_reintenta_en_cpu(self, modelo, monkeypatch):
+        original = WhisperModelFalso.transcribe
+
+        def transcribe(self, audio, **kwargs):
+            if self.kwargs["device"] == "cuda":
+                raise RuntimeError("cuBLAS no disponible")
+            return original(self, audio, **kwargs)
+
+        monkeypatch.setattr(WhisperModelFalso, "transcribe", transcribe)
+        t = Transcriber("small", "es")
+        assert t.device == "cpu" and modelo.instancias[-1].kwargs["device"] == "cpu"
+
+    @pytest.mark.parametrize("device", ["auto", "cpu", "cuda"])
+    def test_device_nunca_es_auto(self, modelo, device):
+        assert Transcriber("small", "es", device=device).device in ("cpu", "cuda")
