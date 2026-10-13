@@ -110,21 +110,131 @@ class TestLoadTranscriber:
         creados = []
 
         class TranscriberFalso:
-            def __init__(self, model, language, vad):
-                creados.append((model, language, vad))
+            def __init__(self, model, language, vad, device, cpu_threads):
+                creados.append((model, language, vad, device, cpu_threads))
 
         monkeypatch.setattr(app, "Transcriber", TranscriberFalso)
         with caplog.at_level("INFO", logger="speechflow"):
-            resultado = app.load_transcriber("small", "en", False)
-        assert isinstance(resultado, TranscriberFalso) and creados == [("small", "en", False)]
+            resultado = app.load_transcriber("small", "en", False, "cuda", 0)
+        assert isinstance(resultado, TranscriberFalso) and creados == [("small", "en", False, "cuda", 0)]
         mensajes = [r.getMessage() for r in caplog.records]
         assert mensajes[0] == "Cargando small (int8, GPU)..."
         assert mensajes[1].startswith("Modelo cargado en ") and mensajes[1].endswith(" s (incluye calentamiento)")
 
     def test_no_notifica(self, monkeypatch, subprocess_falso):
-        monkeypatch.setattr(app, "Transcriber", lambda model, language, vad: object())
+        monkeypatch.setattr(app, "Transcriber", lambda model, language, vad, device, cpu_threads: object())
         app.load_transcriber("small", "en")
         assert subprocess_falso == []
+
+    @pytest.mark.parametrize("device, etiqueta", [("cpu", "CPU"), ("cuda", "GPU"), ("auto", "auto")])
+    def test_registra_el_dispositivo(self, monkeypatch, caplog, device, etiqueta):
+        monkeypatch.setattr(app, "Transcriber", lambda *args: object())
+        with caplog.at_level("INFO", logger="speechflow"):
+            app.load_transcriber("medium", "es", True, device)
+        assert caplog.records[0].getMessage() == f"Cargando medium (int8, {etiqueta})..."
+
+    def test_pasa_dispositivo_e_hilos_al_transcriber(self, monkeypatch):
+        recibido = []
+        monkeypatch.setattr(app, "Transcriber", lambda *args: recibido.append(args) or object())
+        app.load_transcriber("small", "en", True, "cpu", 4)
+        assert recibido == [("small", "en", True, "cpu", 4)]
+
+
+class TestIsHeavyForCpu:
+    @pytest.mark.parametrize("modelo", ["medium", "medium.en", "large-v3", "large-v3-turbo", "distil-large-v3"])
+    def test_pesados(self, modelo):
+        assert app.is_heavy_for_cpu(modelo)
+
+    @pytest.mark.parametrize("modelo", ["tiny", "base", "small", "small.en"])
+    def test_ligeros(self, modelo):
+        assert not app.is_heavy_for_cpu(modelo)
+
+
+def ejecutar_main(monkeypatch, argumentos, transcriber=None, error=None, config=None):
+    """Ejecuta app.main() con todo lo externo sustituido; devuelve las llamadas a load_transcriber."""
+    llamadas = []
+
+    def load(*args):
+        llamadas.append(args)
+        if error is not None:
+            raise error
+        return transcriber
+
+    class Parada(Exception):
+        pass
+
+    monkeypatch.setattr(app, "load_transcriber", load)
+    monkeypatch.setattr(app, "setup_logging", lambda: None)
+    monkeypatch.setattr(app, "log_banner", lambda: None)
+    monkeypatch.setattr(app, "resolve_config", lambda explicit: config or Config())
+    monkeypatch.setattr(app.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(app.sd, "query_devices", lambda *a, **k: {"name": "mic", "default_samplerate": 16000})
+    monkeypatch.setattr(app, "describe_device", lambda device: "mic")
+    monkeypatch.setattr(app, "PushToTalk", lambda *a, **k: (_ for _ in ()).throw(Parada()))
+    monkeypatch.setattr("sys.argv", ["speechflow", "--device", "0", *argumentos])
+    return llamadas, Parada
+
+
+class TestMainDispositivo:
+    def test_cli_gana_sobre_config(self, monkeypatch):
+        t = type("T", (), {"device": "cpu"})()
+        llamadas, Parada = ejecutar_main(monkeypatch, ["--compute-device", "cpu"], t, config=Config(device_compute="cuda", cpu_threads=3))
+        with pytest.raises(Parada):
+            app.main()
+        assert llamadas[0][3:] == ("cpu", 3)
+
+    def test_sin_cli_usa_config(self, monkeypatch):
+        t = type("T", (), {"device": "cuda"})()
+        llamadas, Parada = ejecutar_main(monkeypatch, [], t, config=Config(device_compute="cuda"))
+        with pytest.raises(Parada):
+            app.main()
+        assert llamadas[0][3] == "cuda"
+
+    def test_cuda_con_fallo_sale_con_1_y_sugiere_cpu(self, monkeypatch, caplog):
+        llamadas, _ = ejecutar_main(monkeypatch, ["--compute-device", "cuda"], error=RuntimeError("sin driver"))
+        with pytest.raises(SystemExit) as salida:
+            app.main()
+        assert salida.value.code == 1
+        assert "--compute-device cpu" in caplog.text and "sin driver" in caplog.text
+
+    def test_auto_que_cae_a_cpu_notifica(self, monkeypatch, subprocess_falso):
+        t = type("T", (), {"device": "cpu"})()
+        _, Parada = ejecutar_main(monkeypatch, [], t)
+        with pytest.raises(Parada):
+            app.main()
+        assert any("Sin GPU utilizable: se usa la CPU" in str(c) for c in subprocess_falso)
+
+    def test_auto_con_gpu_no_notifica_caida(self, monkeypatch, subprocess_falso):
+        t = type("T", (), {"device": "cuda"})()
+        _, Parada = ejecutar_main(monkeypatch, [], t)
+        with pytest.raises(Parada):
+            app.main()
+        assert not any("Sin GPU utilizable" in str(c) for c in subprocess_falso)
+
+    def test_cpu_explicito_no_notifica_caida(self, monkeypatch, subprocess_falso):
+        t = type("T", (), {"device": "cpu"})()
+        _, Parada = ejecutar_main(monkeypatch, ["--compute-device", "cpu"], t)
+        with pytest.raises(Parada):
+            app.main()
+        assert not any("Sin GPU utilizable" in str(c) for c in subprocess_falso)
+
+    @pytest.mark.parametrize("modelo, avisa", [("medium", True), ("small", False)])
+    def test_aviso_de_lentitud_en_cpu(self, monkeypatch, caplog, modelo, avisa):
+        t = type("T", (), {"device": "cpu"})()
+        _, Parada = ejecutar_main(monkeypatch, ["--compute-device", "cpu", "--model", modelo], t)
+        with caplog.at_level("INFO", logger="speechflow"), pytest.raises(Parada):
+            app.main()
+        avisos = [r for r in caplog.records if r.levelname == "WARNING" and "small" in r.getMessage() and "lento" in r.getMessage()]
+        assert bool(avisos) is avisa
+        assert any("| CPU |" in r.getMessage() for r in caplog.records)
+
+    def test_medium_en_gpu_no_avisa(self, monkeypatch, caplog):
+        t = type("T", (), {"device": "cuda"})()
+        _, Parada = ejecutar_main(monkeypatch, [], t)
+        with caplog.at_level("INFO", logger="speechflow"), pytest.raises(Parada):
+            app.main()
+        assert not any("lento" in r.getMessage() for r in caplog.records)
+        assert any("| GPU |" in r.getMessage() for r in caplog.records)
 
 
 class TestReadyMessage:

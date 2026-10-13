@@ -35,7 +35,7 @@ import sounddevice as sd
 from pynput import keyboard
 
 from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, device_index, device_name, input_device_by_name, list_devices, next_input_device, parse_device, refresh_devices
-from speechflow.config import Config, ConfigError, find_config, load_config, load_state_device, load_state_language, save_state_device, save_state_language, user_config_path, write_emergency
+from speechflow.config import COMPUTE_DEVICES, Config, ConfigError, find_config, load_config, load_state_device, load_state_language, save_state_device, save_state_language, user_config_path, write_emergency
 from speechflow.inserter import insert_text
 from speechflow.log import LOGGER_NAME, log_banner, setup_logging
 from speechflow.notifier import notify, set_enabled
@@ -503,11 +503,19 @@ def describe_device(device: int | str | None) -> str:
     return f"[{index}] {info['name']} | {int(info['default_samplerate'])} Hz nativos a {SAMPLE_RATE} Hz mono"
 
 
-def load_transcriber(model: str, language: str, vad: bool = True) -> Transcriber:
+DEVICE_LABELS = {"cpu": "CPU", "cuda": "GPU", "auto": "auto"}
+
+
+def is_heavy_for_cpu(model: str) -> bool:
+    """True si `model` es `medium` o mayor (medium, large-*, distil-large-*, turbo), lentos en CPU."""
+    return model.startswith(("medium", "large", "distil-large", "turbo"))
+
+
+def load_transcriber(model: str, language: str, vad: bool = True, device: str = "auto", cpu_threads: int = 0) -> Transcriber:
     """Carga el modelo registrando `Cargando ...` y `Modelo cargado en ...`; no notifica."""
-    logger.info(f"Cargando {model} ({COMPUTE_TYPE}, GPU)...")
+    logger.info(f"Cargando {model} ({COMPUTE_TYPE}, {DEVICE_LABELS[device]})...")
     started = time.perf_counter()
-    transcriber = Transcriber(model, language, vad)
+    transcriber = Transcriber(model, language, vad, device, cpu_threads)
     logger.info(f"Modelo cargado en {time.perf_counter() - started:.2f} s (incluye calentamiento)")
     return transcriber
 
@@ -559,6 +567,7 @@ def main() -> None:
     parser.add_argument("--language", help=f"idioma de la transcripción (defecto: {defaults.language})")
     parser.add_argument("--key", help=f"tecla de disparo, nombre de pynput.keyboard.Key o un carácter (defecto: {defaults.key})")
     parser.add_argument("--switch-key", help=f"tecla de cambio de entrada de audio, mismo formato que --key (defecto: {defaults.switch_key})")
+    parser.add_argument("--compute-device", choices=COMPUTE_DEVICES, help=f"dispositivo de Whisper: auto (GPU si funciona, si no CPU), cpu o cuda (defecto: {defaults.device_compute})")
     parser.add_argument("--config", type=Path, help=f"archivo de configuración TOML (defecto: {config_default})")
     args = parser.parse_args()
 
@@ -573,6 +582,7 @@ def main() -> None:
     model = args.model if args.model is not None else config.model
     language = resolve_language(args.language, config.language)
     key_name = args.key if args.key is not None else config.key
+    compute_device = args.compute_device if args.compute_device is not None else config.device_compute
     switch_key_name = args.switch_key if args.switch_key is not None else config.switch_key
 
     if shutil.which("xdotool") is None:
@@ -619,9 +629,20 @@ def main() -> None:
         sys.exit(1)
 
     notify("SpeechFlow", f"Cargando {model}...")
-    transcriber = load_transcriber(model, language, config.vad)
+    try:
+        transcriber = load_transcriber(model, language, config.vad, compute_device, config.cpu_threads)
+    except Exception as error:
+        if compute_device != "cuda":
+            raise
+        logger.error(f"No se pudo cargar el modelo en la GPU: {error}. Prueba con --compute-device cpu.")
+        notify("SpeechFlow", "No se pudo cargar el modelo en la GPU")
+        sys.exit(1)
     notify("SpeechFlow", f"Modelo {model} cargado")
-    logger.info(f"Modelo: {model} | idioma: {language} | compute_type: {COMPUTE_TYPE} | GPU | VAD: {'sí' if config.vad else 'no'}")
+    if compute_device == "auto" and transcriber.device == "cpu":
+        notify("SpeechFlow", "Sin GPU utilizable: se usa la CPU")
+    logger.info(f"Modelo: {model} | idioma: {language} | compute_type: {COMPUTE_TYPE} | {DEVICE_LABELS[transcriber.device]} | VAD: {'sí' if config.vad else 'no'}")
+    if transcriber.device == "cpu" and is_heavy_for_cpu(model):
+        logger.warning(f"{model} en CPU será lento; considera --model small o [model] name = \"small\".")
     logger.info(f"Dispositivo de audio: {describe_device(device)}")
     logger.info(f"Cambio de entrada de audio: tecla {switch_key_name!r}.")
     logger.info(f"Cambio de idioma: tecla {config.language_key!r}; modo automático: tecla {config.auto_key!r}.")
