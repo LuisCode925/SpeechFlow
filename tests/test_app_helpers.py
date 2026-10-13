@@ -157,9 +157,13 @@ class TestIsHeavyForCpu:
         assert not app.is_heavy_for_cpu(modelo)
 
 
+EVENTOS_LOG = []  # setup_logging / resolve_config / apply_log_levels / log_banner, en orden de llamada
+
+
 def ejecutar_main(monkeypatch, argumentos, transcriber=None, error=None, config=None):
     """Ejecuta app.main() con todo lo externo sustituido; devuelve las llamadas a load_transcriber."""
     llamadas = []
+    EVENTOS_LOG.clear()
 
     def load(*args):
         llamadas.append(args)
@@ -171,9 +175,10 @@ def ejecutar_main(monkeypatch, argumentos, transcriber=None, error=None, config=
         pass
 
     monkeypatch.setattr(app, "load_transcriber", load)
-    monkeypatch.setattr(app, "setup_logging", lambda: None)
-    monkeypatch.setattr(app, "log_banner", lambda: None)
-    monkeypatch.setattr(app, "resolve_config", lambda explicit: config or Config())
+    monkeypatch.setattr(app, "setup_logging", lambda nivel="info": EVENTOS_LOG.append(("setup_logging", nivel)))
+    monkeypatch.setattr(app, "apply_log_levels", lambda consola, archivo: EVENTOS_LOG.append(("apply_log_levels", consola, archivo)))
+    monkeypatch.setattr(app, "log_banner", lambda: EVENTOS_LOG.append(("log_banner",)))
+    monkeypatch.setattr(app, "resolve_config", lambda explicit: EVENTOS_LOG.append(("resolve_config",)) or config or Config())
     monkeypatch.setattr(app.shutil, "which", lambda name: "/usr/bin/" + name)
     monkeypatch.setattr(app.sd, "query_devices", lambda *a, **k: {"name": "mic", "default_samplerate": 16000})
     monkeypatch.setattr(app, "describe_device", lambda device: "mic")
@@ -184,6 +189,57 @@ def ejecutar_main(monkeypatch, argumentos, transcriber=None, error=None, config=
     monkeypatch.setattr(app, "PushToTalk", crear_ptt)
     monkeypatch.setattr("sys.argv", ["speechflow", "--device", "0", *argumentos])
     return llamadas, Parada
+
+
+class TestMainNivelesDeLog:
+    def correr(self, monkeypatch, argumentos, config=None):
+        t = type("T", (), {"device": "cpu", "model_name": "small"})()
+        llamadas, Parada = ejecutar_main(monkeypatch, argumentos, t, config=config)
+        with pytest.raises(Parada):
+            app.main()
+        return {l[0]: l[1:] for l in EVENTOS_LOG}
+
+    def test_defecto(self, monkeypatch):
+        r = self.correr(monkeypatch, [])
+        assert r["setup_logging"] == ("info",) and r["apply_log_levels"] == ("info", "info") and "log_banner" in r
+
+    @pytest.mark.parametrize(
+        "opcion, nivel", [(["--quiet"], "warning"), (["--verbose"], "debug"), (["--log-level", "error"], "error")]
+    )
+    def test_cli_fija_el_nivel_inicial_y_final(self, monkeypatch, opcion, nivel):
+        r = self.correr(monkeypatch, opcion, config=Config(log_level="debug", log_file_level="warning"))
+        assert r["setup_logging"] == (nivel,) and r["apply_log_levels"] == (nivel, "warning")
+
+    def test_toml_sin_cli(self, monkeypatch):
+        r = self.correr(monkeypatch, [], config=Config(log_level="warning", log_file_level="debug"))
+        assert r["setup_logging"] == ("info",) and r["apply_log_levels"] == ("warning", "debug")
+
+    @pytest.mark.parametrize("nivel, banner", [("debug", True), ("info", True), ("warning", False), ("error", False)])
+    def test_banner_segun_nivel_final(self, monkeypatch, nivel, banner):
+        r = self.correr(monkeypatch, [], config=Config(log_level=nivel))
+        assert ("log_banner" in r) is banner
+
+    def test_orden_de_arranque(self, monkeypatch):
+        self.correr(monkeypatch, [])
+        assert [e[0] for e in EVENTOS_LOG] == ["setup_logging", "resolve_config", "apply_log_levels", "log_banner"]
+
+    @pytest.mark.parametrize("opciones", [["--quiet", "--verbose"], ["--quiet", "--log-level", "info"], ["--verbose", "--log-level", "debug"]])
+    def test_opciones_excluyentes(self, monkeypatch, opciones, capsys):
+        _, Parada = ejecutar_main(monkeypatch, opciones)
+        with pytest.raises(SystemExit) as salida:
+            app.main()
+        assert salida.value.code == 2 and "not allowed with" in capsys.readouterr().err
+
+    def test_log_level_invalido(self, monkeypatch):
+        ejecutar_main(monkeypatch, ["--log-level", "trace"])
+        with pytest.raises(SystemExit) as salida:
+            app.main()
+        assert salida.value.code == 2
+
+    def test_debug_de_comprobacion(self, monkeypatch, caplog):
+        caplog.set_level("DEBUG", logger="speechflow")
+        self.correr(monkeypatch, ["--verbose"], config=Config(log_file_level="warning"))
+        assert any(r.levelname == "DEBUG" and r.getMessage() == "Niveles de log: consola=debug, archivo=warning" for r in caplog.records)
 
 
 class TestMainDispositivo:

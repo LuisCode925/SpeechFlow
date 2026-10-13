@@ -35,9 +35,9 @@ import sounddevice as sd
 from pynput import keyboard
 
 from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, device_index, device_name, input_device_by_name, list_devices, next_input_device, parse_device, refresh_devices
-from speechflow.config import COMPUTE_DEVICES, Config, ConfigError, find_config, load_config, load_state_device, load_state_language, save_state_device, save_state_language, user_config_path, write_emergency
+from speechflow.config import COMPUTE_DEVICES, LOG_LEVELS, Config, ConfigError, find_config, load_config, load_state_device, load_state_language, save_state_device, save_state_language, user_config_path, write_emergency
 from speechflow.inserter import insert_text
-from speechflow.log import LOGGER_NAME, log_banner, setup_logging
+from speechflow.log import LOGGER_NAME, apply_log_levels, log_banner, setup_logging
 from speechflow.notifier import notify, set_enabled
 from speechflow.punctuation import apply_voice_punctuation
 from speechflow.transcriber import AUTO_LANGUAGE, COMPUTE_TYPE, DEFAULT_CPU_MODEL, DEFAULT_LANGUAGE, DEFAULT_MODEL, SAMPLE_RATE, Transcriber
@@ -583,6 +583,10 @@ def main() -> None:
     parser.add_argument("--key", help=f"tecla de disparo, nombre de pynput.keyboard.Key o un carácter (defecto: {defaults.key})")
     parser.add_argument("--switch-key", help=f"tecla de cambio de entrada de audio, mismo formato que --key (defecto: {defaults.switch_key})")
     parser.add_argument("--compute-device", choices=COMPUTE_DEVICES, help=f"dispositivo de Whisper: auto (GPU si funciona, si no CPU), cpu o cuda (defecto: {defaults.device_compute})")
+    niveles = parser.add_mutually_exclusive_group()
+    niveles.add_argument("--quiet", action="store_true", help="consola solo con avisos y errores (como --log-level warning; no cambia el archivo de log)")
+    niveles.add_argument("--verbose", action="store_true", help="consola con mensajes de depuración (como --log-level debug; no cambia el archivo de log)")
+    niveles.add_argument("--log-level", choices=LOG_LEVELS, help=f"nivel de la consola (defecto: {defaults.log_level})")
     parser.add_argument("--config", type=Path, help=f"archivo de configuración TOML (defecto: {config_default})")
     args = parser.parse_args()
 
@@ -590,9 +594,14 @@ def main() -> None:
         list_devices()
         return
 
-    setup_logging()
-    log_banner()
+    cli_level = "warning" if args.quiet else "debug" if args.verbose else args.log_level
+    setup_logging(cli_level or defaults.log_level)
     config = resolve_config(args.config)
+    console_level = cli_level or config.log_level  # CLI > archivo > defecto
+    apply_log_levels(console_level, config.log_file_level)
+    logger.debug(f"Niveles de log: consola={console_level}, archivo={config.log_file_level}")
+    if console_level in ("debug", "info"):
+        log_banner()
     # CLI > archivo > defectos; un argumento solo cuenta si se escribió (defecto None)
     model = args.model if args.model is not None else config.model
     language = resolve_language(args.language, config.language)
