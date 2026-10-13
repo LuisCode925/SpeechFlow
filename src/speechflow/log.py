@@ -39,7 +39,7 @@ class _FlushingStreamHandler(logging.StreamHandler):
         self.flush()
 
 
-class _PrivateRotatingFileHandler(RotatingFileHandler):
+class PrivateRotatingFileHandler(RotatingFileHandler):
     """RotatingFileHandler que crea cada archivo (también tras rotar) con permisos 0600."""
 
     def _open(self):
@@ -104,7 +104,7 @@ def _add_file_handler(logger: logging.Logger, formatter: logging.Formatter) -> N
     try:
         path = log_path()
         state_dir().mkdir(parents=True, exist_ok=True)
-        handler = _PrivateRotatingFileHandler(
+        handler = PrivateRotatingFileHandler(
             path, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT, encoding="utf-8"
         )
     except (OSError, RuntimeError) as error:
