@@ -95,7 +95,7 @@ def test_transcribe_sin_vad_pasa_false(modelo):
 
 def test_valores_por_defecto(modelo):
     t = Transcriber()
-    assert modelo.instancias[0].nombre == "medium" and t.language == "es"
+    assert modelo.instancias[0].nombre == "medium" and t.model_name == "medium" and t.language == "es"
 
 
 def test_audio_vacio_no_llama_al_modelo(modelo):
@@ -284,6 +284,45 @@ class TestDispositivo:
         monkeypatch.setattr(WhisperModelFalso, "transcribe", transcribe)
         t = Transcriber("small", "es")
         assert t.device == "cpu" and modelo.instancias[-1].kwargs["device"] == "cpu"
+
+    def test_cpu_sin_modelo_carga_small_con_info(self, modelo, caplog):
+        with caplog.at_level("INFO", logger="speechflow"):
+            t = Transcriber(device="cpu")
+        assert modelo.instancias[0].nombre == "small" and t.model_name == "small"
+        assert any("Modelo no fijado: se usa small por defecto en CPU." in r.getMessage() for r in caplog.records)
+
+    def test_cuda_sin_modelo_carga_medium(self, modelo):
+        t = Transcriber(device="cuda")
+        assert modelo.instancias[0].nombre == "medium" and t.model_name == "medium"
+
+    def test_auto_sin_gpu_y_sin_modelo_carga_small(self, modelo, ct2):
+        ct2.gpus = 0
+        t = Transcriber()
+        assert modelo.instancias[0].nombre == "small" and t.model_name == "small"
+
+    def test_auto_con_gpu_y_sin_modelo_carga_medium(self, modelo):
+        t = Transcriber()
+        assert t.device == "cuda" and t.model_name == "medium" and modelo.instancias[0].nombre == "medium"
+
+    def test_auto_con_fallo_de_gpu_y_sin_modelo_reintenta_con_small(self, modelo, monkeypatch):
+        fallar_en(monkeypatch, "cuda")
+        t = Transcriber()
+        assert t.device == "cpu" and t.model_name == "small" and modelo.instancias[-1].nombre == "small"
+
+    def test_modelo_explicito_se_respeta_en_cpu_sin_info(self, modelo, caplog):
+        with caplog.at_level("INFO", logger="speechflow"):
+            t = Transcriber("medium", device="cpu")
+        assert modelo.instancias[0].nombre == "medium" and t.model_name == "medium"
+        assert not any("Modelo no fijado" in r.getMessage() for r in caplog.records)
+
+    def test_modelo_explicito_se_respeta_en_el_reintento_de_auto(self, modelo, monkeypatch):
+        fallar_en(monkeypatch, "cuda")
+        t = Transcriber("medium")
+        assert t.device == "cpu" and t.model_name == "medium" and modelo.instancias[-1].nombre == "medium"
+
+    @pytest.mark.parametrize("device", ["auto", "cpu", "cuda"])
+    def test_model_name_nunca_es_none(self, modelo, device):
+        assert isinstance(Transcriber(device=device).model_name, str)
 
     @pytest.mark.parametrize("device", ["auto", "cpu", "cuda"])
     def test_device_nunca_es_auto(self, modelo, device):

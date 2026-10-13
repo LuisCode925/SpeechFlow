@@ -11,7 +11,8 @@ logger = logging.getLogger("speechflow")
 
 SAMPLE_RATE = 16000  # Hz, nativo de Whisper
 COMPUTE_TYPE = "int8"
-DEFAULT_MODEL = "medium"
+DEFAULT_MODEL = "medium"  # defecto en GPU
+DEFAULT_CPU_MODEL = "small"  # defecto en CPU
 DEFAULT_LANGUAGE = "es"
 AUTO_LANGUAGE = "auto"  # idioma especial: detecta entre AUTO_CANDIDATES en cada dictado
 AUTO_CANDIDATES = ("es", "en")
@@ -20,7 +21,7 @@ AUTO_CANDIDATES = ("es", "en")
 class Transcriber:
     def __init__(
         self,
-        model_name: str = DEFAULT_MODEL,
+        model_name: str | None = None,
         language: str = DEFAULT_LANGUAGE,
         vad: bool = True,
         device: str = "auto",
@@ -30,6 +31,8 @@ class Transcriber:
 
         `device` "cpu" o "cuda" fuerza ese dispositivo (con "cuda" un fallo se propaga); "auto" usa la GPU si hay
         y funciona, y si no cae a CPU con un WARNING. `Transcriber.device` es el dispositivo realmente usado.
+        `model_name` None = sin fijar: DEFAULT_MODEL en GPU y DEFAULT_CPU_MODEL en CPU (también en el reintento de
+        "auto"); uno explícito se usa siempre. `Transcriber.model_name` es el modelo realmente cargado.
         """
         self.language = language
         self.vad = vad
@@ -41,17 +44,28 @@ class Transcriber:
                 logger.warning("No hay GPU CUDA visible: se usa la CPU.")
             else:
                 try:
-                    self._model = self._load(model_name, "cuda", cpu_threads)
+                    self._model = self._load(model_name or DEFAULT_MODEL, "cuda", cpu_threads)
+                    self.model_name = model_name or DEFAULT_MODEL
                     self.device = "cuda"
                 except Exception as e:
                     logger.warning("No se pudo cargar el modelo en la GPU (%s): se usa la CPU.", e)
                     self._model = None
                     gc.collect()  # libera lo que la GPU alcanzó a cargar antes de reintentar
             if self._model is None:
-                self._model = self._load(model_name, "cpu", cpu_threads)
+                self.model_name = self._resolve_cpu_model(model_name)
+                self._model = self._load(self.model_name, "cpu", cpu_threads)
         else:
-            self._model = self._load(model_name, device, cpu_threads)
+            self.model_name = self._resolve_cpu_model(model_name) if device == "cpu" else model_name or DEFAULT_MODEL
+            self._model = self._load(self.model_name, device, cpu_threads)
             self.device = device
+
+    @staticmethod
+    def _resolve_cpu_model(model_name: str | None) -> str:
+        """El modelo explícito, o DEFAULT_CPU_MODEL (con un INFO) si no está fijado."""
+        if model_name is not None:
+            return model_name
+        logger.info("Modelo no fijado: se usa %s por defecto en CPU.", DEFAULT_CPU_MODEL)
+        return DEFAULT_CPU_MODEL
 
     def _load(self, model_name: str, device: str, cpu_threads: int) -> WhisperModel:
         """Crea el WhisperModel en `device` y lo calienta."""
