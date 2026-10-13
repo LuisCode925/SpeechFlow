@@ -28,9 +28,12 @@ class Config:
     auto_key: str = "f6"  # [keys] auto; activa o desactiva la detección automática de idioma
     mode: str = "hold"  # [recording] mode; "hold" (mantener) o "toggle" (pulsar y pulsar)
     punctuation_commands: bool = True  # [text] punctuation_commands; sustituye "punto", "coma"... por su signo
+    device_compute: str = "auto"  # [model] device; "auto", "cpu" o "cuda"
+    cpu_threads: int = 0  # [model] cpu_threads; 0 = defecto de faster-whisper
 
 
 RECORDING_MODES = ("hold", "toggle")
+COMPUTE_DEVICES = ("auto", "cpu", "cuda")
 
 
 class ConfigError(Exception):
@@ -44,6 +47,8 @@ _SCHEMA: dict[str, dict[str, tuple[tuple[type, ...], str]]] = {
         "language": ((str,), "language"),
         "idle_timeout": ((int, float), "idle_timeout"),
         "vad": ((bool,), "vad"),
+        "device": ((str,), "device_compute"),
+        "cpu_threads": ((int,), "cpu_threads"),
     },
     "keys": {
         "record": ((str,), "key"),
@@ -140,6 +145,10 @@ def load_config(path: Path) -> Config:
         )
     if config.mode not in RECORDING_MODES:
         raise ConfigError(f'recording.mode debe ser "hold" o "toggle", no {config.mode!r}')
+    if config.device_compute not in COMPUTE_DEVICES:
+        raise ConfigError(f'model.device debe ser "auto", "cpu" o "cuda", no {config.device_compute!r}')
+    if config.cpu_threads < 0:
+        raise ConfigError(f"model.cpu_threads debe ser 0 o mayor, no {config.cpu_threads}")
     if config.watch_interval < 1.0:
         raise ConfigError(f"audio.watch_interval debe ser al menos 1.0, no {config.watch_interval}")
     if config.idle_timeout != 0 and config.idle_timeout < 30.0:
@@ -157,6 +166,8 @@ def _emergency_template() -> str:
         f"language = {json.dumps(d.language)}\n"
         f"idle_timeout = {d.idle_timeout}  # segundos sin dictar antes de liberar el modelo; 0 desactiva; mínimo 30.0\n"
         f"vad = {str(d.vad).lower()}  # filtra silencios y ruido sin voz antes de transcribir; false desactiva\n"
+        f"device = {json.dumps(d.device_compute)}  # \"auto\": GPU si hay y funciona, si no CPU; \"cpu\": solo CPU; \"cuda\": solo GPU (falla si no hay)\n"
+        f"cpu_threads = {d.cpu_threads}  # hilos de CPU para Whisper; 0 usa el defecto de faster-whisper\n"
         "\n"
         "[keys]\n"
         f"record = {json.dumps(d.key)}\n"

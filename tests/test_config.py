@@ -139,6 +139,36 @@ class TestLoadConfig:
         with pytest.raises(ConfigError, match="recording.mode debe ser str"):
             config.load_config(escribir(tmp_path, f"[recording]\nmode = {valor}\n"))
 
+    def test_device_compute_defectos(self, tmp_path):
+        c = config.load_config(escribir(tmp_path, ""))
+        assert Config().device_compute == "auto" and Config().cpu_threads == 0
+        assert c.device_compute == "auto" and c.cpu_threads == 0
+
+    @pytest.mark.parametrize("valor", ["auto", "cpu", "cuda"])
+    def test_device_compute_valido(self, tmp_path, valor):
+        assert config.load_config(escribir(tmp_path, f'[model]\ndevice = "{valor}"\n')).device_compute == valor
+
+    @pytest.mark.parametrize("valor", ["gpu", "CPU", ""])
+    def test_device_compute_valor_invalido(self, tmp_path, valor):
+        with pytest.raises(ConfigError, match="model.device"):
+            config.load_config(escribir(tmp_path, f'[model]\ndevice = "{valor}"\n'))
+
+    def test_device_compute_tipo_invalido(self, tmp_path):
+        with pytest.raises(ConfigError, match="model.device debe ser str, no int"):
+            config.load_config(escribir(tmp_path, "[model]\ndevice = 1\n"))
+
+    def test_cpu_threads_valido(self, tmp_path):
+        assert config.load_config(escribir(tmp_path, "[model]\ncpu_threads = 4\n")).cpu_threads == 4
+
+    def test_cpu_threads_negativo(self, tmp_path):
+        with pytest.raises(ConfigError, match="model.cpu_threads"):
+            config.load_config(escribir(tmp_path, "[model]\ncpu_threads = -1\n"))
+
+    @pytest.mark.parametrize("valor", ["true", "1.5", '"4"'])
+    def test_cpu_threads_tipo_invalido(self, tmp_path, valor):
+        with pytest.raises(ConfigError, match="model.cpu_threads debe ser int"):
+            config.load_config(escribir(tmp_path, f"[model]\ncpu_threads = {valor}\n"))
+
     def test_archivo_inexistente(self, tmp_path):
         with pytest.raises(ConfigError, match="no se puede leer"):
             config.load_config(tmp_path / "no.toml")
