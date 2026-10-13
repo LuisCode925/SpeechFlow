@@ -6,6 +6,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from speechflow.replacements import compile_rules
 from speechflow.transcriber import DEFAULT_LANGUAGE
 
 logger = logging.getLogger("speechflow")
@@ -36,12 +37,16 @@ class Config:
     terminal_classes: tuple[str, ...] = ()  # [text] terminal_classes; se suman a TERMINAL_CLASSES del inserter
     history_enabled: bool = True  # [history] enabled; guarda cada dictado en history.jsonl
     history_max_mb: float = 5.0  # [history] max_mb; tamaño del archivo activo antes de rotar
+    initial_prompt: str = ""  # [model] initial_prompt; contexto para Whisper, vacío = sin prompt
+    replacements: tuple[tuple[str, str], ...] = ()  # [replacements] plano, en orden del TOML
+    replacements_by_language: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = ()  # [replacements.<idioma>]
 
 
 RECORDING_MODES = ("hold", "toggle")
 COMPUTE_DEVICES = ("auto", "cpu", "cuda")
 LOG_LEVELS = ("debug", "info", "warning", "error")
 INSERT_METHODS = ("clipboard", "type")
+INITIAL_PROMPT_WARN_CHARS = 1000
 
 
 class ConfigError(Exception):
@@ -57,6 +62,7 @@ _SCHEMA: dict[str, dict[str, tuple[tuple[type, ...], str]]] = {
         "vad": ((bool,), "vad"),
         "device": ((str,), "device_compute"),
         "cpu_threads": ((int,), "cpu_threads"),
+        "initial_prompt": ((str,), "initial_prompt"),
     },
     "keys": {
         "record": ((str,), "key"),
@@ -128,6 +134,34 @@ def find_config(explicit: Path | None) -> Path | None:
     return path if path.is_file() else None
 
 
+def _parse_replacements(table: dict[str, object], prefix: str) -> tuple[tuple[str, str], ...]:
+    """Pares (patrón, reemplazo) de una tabla plana, validados compilándolos. Lanza ConfigError."""
+    pairs = []
+    for pattern, replacement in table.items():
+        name = f"{prefix}.{pattern}"
+        if not isinstance(replacement, str):
+            raise ConfigError(f"{name} debe ser str, no {type(replacement).__name__}")
+        if not pattern:
+            raise ConfigError(f"{name}: el patrón no puede estar vacío")
+        try:
+            compile_rules([(pattern, replacement)])
+        except ValueError as e:
+            raise ConfigError(f"{name}: {e}") from e
+        pairs.append((pattern, replacement))
+    return tuple(pairs)
+
+
+def _load_replacements(content: dict[str, object]) -> tuple[tuple[tuple[str, str], ...], tuple[tuple[str, tuple[tuple[str, str], ...]], ...]]:
+    flat = {k: v for k, v in content.items() if not isinstance(v, dict)}
+    by_language = []
+    for language, table in content.items():
+        if isinstance(table, dict):
+            if not language.strip():
+                raise ConfigError("replacements no admite una subtabla con nombre vacío")
+            by_language.append((language, _parse_replacements(table, f"replacements.{language}")))
+    return _parse_replacements(flat, "replacements"), tuple(by_language)
+
+
 def load_config(path: Path) -> Config:
     """Lee y valida el TOML de `path`; lo omitido toma el defecto. Lanza ConfigError."""
     try:
@@ -140,10 +174,13 @@ def load_config(path: Path) -> Config:
 
     values: dict[str, object] = {}
     for section, content in data.items():
-        if section not in _SCHEMA:
+        if section not in _SCHEMA and section != "replacements":
             raise ConfigError(f"sección desconocida [{section}]")
         if not isinstance(content, dict):
             raise ConfigError(f"[{section}] debe ser una tabla")
+        if section == "replacements":
+            values["replacements"], values["replacements_by_language"] = _load_replacements(content)
+            continue
         for key, value in content.items():
             if key not in _SCHEMA[section]:
                 raise ConfigError(f"clave desconocida {section}.{key}")
@@ -184,6 +221,10 @@ def load_config(path: Path) -> Config:
         raise ConfigError(f"model.idle_timeout debe ser 0 o al menos 30.0, no {config.idle_timeout}")
     if config.history_max_mb <= 0:
         raise ConfigError(f"history.max_mb debe ser mayor que 0, no {config.history_max_mb}")
+    if len(config.initial_prompt) > INITIAL_PROMPT_WARN_CHARS:
+        logger.warning(
+            "model.initial_prompt tiene %d caracteres; Whisper solo usa los últimos ~224 tokens.", len(config.initial_prompt)
+        )
     return config
 
 
@@ -199,6 +240,7 @@ def _emergency_template() -> str:
         f"vad = {str(d.vad).lower()}  # filtra silencios y ruido sin voz antes de transcribir; false desactiva\n"
         f"device = {json.dumps(d.device_compute)}  # \"auto\": GPU si hay y funciona, si no CPU; \"cpu\": solo CPU; \"cuda\": solo GPU (falla si no hay)\n"
         f"cpu_threads = {d.cpu_threads}  # hilos de CPU para Whisper; 0 usa el defecto de faster-whisper\n"
+        '# initial_prompt = ""  # contexto para Whisper; ej.: "Hablo de GitHub, PyTorch y Kubernetes."\n'
         "\n"
         "[keys]\n"
         f"record = {json.dumps(d.key)}\n"
@@ -230,6 +272,13 @@ def _emergency_template() -> str:
         "[history]\n"
         f"enabled = {str(d.history_enabled).lower()}  # guarda cada dictado en history.jsonl (texto en claro, permisos 0600); false no crea el archivo\n"
         f"max_mb = {d.history_max_mb}  # tamaño máximo del archivo activo antes de rotar (se conservan 2 copias); mayor que 0\n"
+        "\n"
+        "[replacements]\n"
+        '# "git ?hub" = "GitHub"  # regex sin distinguir mayúsculas -> reemplazo; admite \\1 y \\g<nombre>\n'
+        '# "pi ?torch" = "PyTorch"\n'
+        "\n"
+        "# [replacements.es]  # solo se aplican si el idioma del dictado es es; antes que las de la tabla plana\n"
+        '# "cuber ?netis" = "Kubernetes"\n'
     )
 
 

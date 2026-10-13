@@ -361,6 +361,89 @@ class TestLoadConfig:
         config.load_config(escribir(tmp_path, texto))
 
 
+class TestInitialPrompt:
+    def test_defecto(self):
+        assert Config().initial_prompt == ""
+
+    def test_valido(self, tmp_path):
+        c = config.load_config(escribir(tmp_path, '[model]\ninitial_prompt = "Kubernetes"\n'))
+        assert c.initial_prompt == "Kubernetes"
+
+    def test_tipo_incorrecto(self, tmp_path):
+        with pytest.raises(ConfigError, match="model.initial_prompt debe ser str, no int"):
+            config.load_config(escribir(tmp_path, "[model]\ninitial_prompt = 5\n"))
+
+    def test_largo_avisa_y_no_trunca(self, tmp_path, caplog):
+        prompt = "a" * (config.INITIAL_PROMPT_WARN_CHARS + 1)
+        with caplog.at_level("WARNING", logger="speechflow"):
+            c = config.load_config(escribir(tmp_path, f'[model]\ninitial_prompt = "{prompt}"\n'))
+        assert c.initial_prompt == prompt
+        assert "model.initial_prompt tiene 1001 caracteres" in caplog.text
+
+    def test_en_el_limite_no_avisa(self, tmp_path, caplog):
+        prompt = "a" * config.INITIAL_PROMPT_WARN_CHARS
+        with caplog.at_level("WARNING", logger="speechflow"):
+            config.load_config(escribir(tmp_path, f'[model]\ninitial_prompt = "{prompt}"\n'))
+        assert "initial_prompt" not in caplog.text
+
+
+class TestReplacements:
+    def test_defectos(self):
+        assert Config().replacements == () and Config().replacements_by_language == ()
+
+    def test_sin_tabla_da_defectos(self, tmp_path):
+        c = config.load_config(escribir(tmp_path, "[model]\nvad = true\n"))
+        assert c.replacements == () and c.replacements_by_language == ()
+
+    def test_tabla_plana_conserva_orden(self, tmp_path):
+        c = config.load_config(escribir(tmp_path, '[replacements]\n"zeta" = "Z"\n"alfa" = "A"\n\'(\\d+) por ciento\' = \'\\1 %\'\n'))
+        assert c.replacements == (("zeta", "Z"), ("alfa", "A"), (r"(\d+) por ciento", r"\1 %"))
+        assert c.replacements_by_language == ()
+
+    def test_subtablas_por_idioma(self, tmp_path):
+        texto = '[replacements]\n"b" = "B"\n[replacements.es]\n"z" = "Z"\n"a" = "A"\n[replacements.en]\n"c" = "C"\n'
+        c = config.load_config(escribir(tmp_path, texto))
+        assert c.replacements == (("b", "B"),)
+        assert c.replacements_by_language == (("es", (("z", "Z"), ("a", "A"))), ("en", (("c", "C"),)))
+
+    def test_idioma_cualquiera_es_valido(self, tmp_path):
+        c = config.load_config(escribir(tmp_path, '[replacements.xx]\n"a" = "b"\n'))
+        assert c.replacements_by_language == (("xx", (("a", "b"),)),)
+
+    def test_valor_no_textual(self, tmp_path):
+        with pytest.raises(ConfigError, match="replacements.a debe ser str, no int"):
+            config.load_config(escribir(tmp_path, '[replacements]\n"a" = 5\n'))
+
+    def test_valor_no_textual_en_subtabla(self, tmp_path):
+        with pytest.raises(ConfigError, match=r"replacements\.es\.a debe ser str, no bool"):
+            config.load_config(escribir(tmp_path, '[replacements.es]\n"a" = true\n'))
+
+    def test_patron_vacio(self, tmp_path):
+        with pytest.raises(ConfigError, match="replacements."):
+            config.load_config(escribir(tmp_path, '[replacements]\n"" = "x"\n'))
+
+    def test_regex_invalida(self, tmp_path):
+        with pytest.raises(ConfigError, match=r"replacements\.\(: regex inválida"):
+            config.load_config(escribir(tmp_path, '[replacements]\n"(" = "x"\n'))
+
+    def test_regex_invalida_en_subtabla(self, tmp_path):
+        with pytest.raises(ConfigError, match=r"replacements\.es\.\(: regex inválida"):
+            config.load_config(escribir(tmp_path, '[replacements.es]\n"(" = "x"\n'))
+
+    def test_patron_que_coincide_con_vacio(self, tmp_path):
+        with pytest.raises(ConfigError, match=r"replacements\.x\*: .*cadena vacía"):
+            config.load_config(escribir(tmp_path, '[replacements]\n"x*" = "y"\n'))
+
+    def test_referencia_invalida(self, tmp_path):
+        with pytest.raises(ConfigError, match=r"replacements\.a: reemplazo inválido"):
+            config.load_config(escribir(tmp_path, '[replacements]\n"a" = "\\\\1"\n'))
+
+    def test_no_loguea_patrones(self, tmp_path, caplog):
+        with caplog.at_level("DEBUG", logger="speechflow"):
+            config.load_config(escribir(tmp_path, '[replacements]\n"secreto" = "privado"\n'))
+        assert "secreto" not in caplog.text and "privado" not in caplog.text
+
+
 class TestWriteEmergency:
     def test_crea_plantilla_y_carpeta(self):
         ruta = config.write_emergency()
