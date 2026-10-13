@@ -9,6 +9,7 @@
 # device = "auto"        # "auto": GPU si hay y funciona, si no CPU; "cpu": solo CPU; "cuda": solo GPU (falla si no hay)
 # cpu_threads = 0        # hilos de CPU para Whisper; 0 usa el defecto de faster-whisper
 # vad = true             # filtra silencios y ruido sin voz antes de transcribir; false desactiva
+# initial_prompt = ""    # contexto para Whisper en cada dictado; ej.: "Hablo de GitHub, PyTorch y Kubernetes."; vacío = sin prompt
 
 [keys]
 # record = "ctrl_r"      # nombre de pynput.keyboard.Key (ctrl_r, f9, ...) o un carácter suelto
@@ -40,3 +41,18 @@
 [history]
 # enabled = true         # guarda cada dictado en history.jsonl (texto en claro, permisos 0600); false no crea el archivo
 # max_mb = 5             # tamaño máximo del archivo activo antes de rotar (se conservan 2 copias); mayor que 0
+
+# Diccionario de reemplazos: "regex" = "reemplazo". Se aplica al texto final (tras la puntuación por voz), sin distinguir
+# mayúsculas, en el orden del archivo; cada regla ve la salida de la anterior. El reemplazo admite \1 y \g<nombre>.
+# Las barras invertidas van mejor entre comillas simples. Un patrón inválido o que coincide con la cadena vacía invalida el archivo.
+[replacements]
+# "git ?hub" = "GitHub"
+# "pi ?torch" = "PyTorch"
+# '(\d+) por ciento' = '\1 %'
+
+# Solo se aplican si el idioma del dictado coincide (también en modo auto); van antes que las de la tabla plana.
+[replacements.es]
+# "cuber ?netis" = "Kubernetes"
+
+[replacements.en]
+# "cube ?r ?netes" = "Kubernetes"

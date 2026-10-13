@@ -95,6 +95,7 @@ print(f"{seconds:.2f} s: {text}")
 
 - `src/speechflow/audio.py`: dispositivos de entrada, remuestreo, medición, guardado de WAV y `Recorder` (`start()` / `stop()`), que graba a la tasa nativa del dispositivo y devuelve `int16` mono a 16 kHz. Para el cambio de entrada en caliente expone `input_devices()` (índices con entrada), `refresh_devices()` (reinicializa PortAudio para ver micrófonos conectados o desconectados; solo sin streams abiertos), `device_index()` (índice real de un dispositivo, o `None`) y `next_input_device()` (el siguiente, con vuelta al principio). Para vigilar el micrófono seleccionado expone `device_name()` (nombre de un dispositivo, o `None`), `input_device_by_name()` (índice del primer dispositivo de entrada con ese nombre exacto, o `None`) y `Recorder.active` (hay un stream abierto y activo); `Recorder.stop()` tolera un stream caído. Lo usan `capture_mic.py` y `app.py`.
 - `src/speechflow/punctuation.py`: `apply_voice_punctuation(text, language)`, función pura que sustituye los comandos de voz de puntuación (ver [Comandos de voz de puntuación](#comandos-de-voz-de-puntuación)); `app.py` la aplica entre la transcripción y `insert_text()`.
+- `src/speechflow/replacements.py`: `compile_rules(pairs)` compila pares `(patrón, reemplazo)` con `re.IGNORECASE` (`ValueError` si no son válidos) y `apply_replacements(text, rules)` los aplica en orden. Ver [Diccionario de reemplazos e `initial_prompt`](#diccionario-de-reemplazos-e-initial_prompt).
 - `src/speechflow/inserter.py`: `insert_text(text, method, extra_terminals)` inserta el texto en la ventana con foco. Con `method="clipboard"` (el defecto) lo copia al portapapeles con `xclip`, lo pega con `xdotool key` (`Ctrl+V`, o `Ctrl+Shift+V` si la ventana es una terminal) y restaura el texto previo del portapapeles; si `xclip` o `xdotool` fallan, registra un `WARNING` y teclea con `xdotool type --clearmodifiers`, que es también el comportamiento de `method="type"`.
 - `src/speechflow/notifier.py`: `notify(title, body)` envía una notificación de escritorio con `notify-send`; si no está instalado o están desactivadas con `set_enabled(False)`, no hace nada.
 - `src/speechflow/config.py`: configuración de usuario de la app de push-to-talk (`Config`, `find_config()`, `load_config()`, `write_emergency()` y el estado del micrófono con `load_state_device()` / `save_state_device()`). Ver [Configuración](#configuración).
@@ -236,6 +237,47 @@ Ejemplo: dictar "hola coma mundo punto" inserta `Hola, mundo.`.
 2026-10-09 10:15:03.222 INFO    Insertado (0.42 s, 0.12x tiempo real, 12 caracteres, medium/es): Hola, mundo.
 ```
 
+## Diccionario de reemplazos e `initial_prompt`
+
+Whisper escribe mal nombres propios, marcas y jerga (`git hub`, `pi torch`, `cuber netis`). Hay dos palancas complementarias: darle contexto antes de transcribir (`[model] initial_prompt`, que reduce el error) y corregir lo que aun así falla después (`[replacements]`, que lo elimina de forma determinista). Ambas se leen solo al arrancar; cambiarlas exige reiniciar.
+
+### `[model] initial_prompt`
+
+Texto que se pasa a Whisper como contexto en cada dictado. Vacío (el defecto) significa sin prompt. No se usa en la detección automática de idioma y se conserva al recargar el modelo tras la descarga por inactividad.
+
+```toml
+[model]
+initial_prompt = "Hablo de GitHub, PyTorch y Kubernetes."
+```
+
+- **Longitud:** Whisper solo usa los últimos ~224 tokens. Si pasa de 1000 caracteres, el arranque registra `WARNING` `model.initial_prompt tiene <n> caracteres; Whisper solo usa los últimos ~224 tokens.` y se usa sin truncar.
+- **Consejos:** escribe una frase corta y natural con los términos tal como quieres verlos (mayúsculas y grafía incluidas), en el idioma que más dictas; una lista de palabras sueltas funciona peor que una frase. Un prompt mal elegido puede sesgar o empeorar la transcripción (que repita el prompt o invente vocabulario); si pasa, déjalo vacío o acórtalo. Es único para todos los idiomas.
+
+### `[replacements]`
+
+Reglas `"patrón" = "reemplazo"` que se aplican al texto ya con la puntuación por voz y antes de guardarlo en el historial y de insertarlo.
+
+```toml
+[replacements]
+"git ?hub" = "GitHub"
+"pi ?torch" = "PyTorch"
+'(\d+) por ciento' = '\1 %'
+
+[replacements.es]
+"cuber ?netis" = "Kubernetes"
+
+[replacements.en]
+"cube ?r ?netes" = "Kubernetes"
+```
+
+- **Sintaxis:** el patrón es una expresión regular de Python (`re`) y el reemplazo admite `\1` y `\g<nombre>`. No distingue mayúsculas (`re.IGNORECASE`); para distinguirlas usa `(?-i:...)` dentro del patrón. El reemplazo se inserta tal cual, sin adaptar la capitalización.
+- **Barras invertidas en TOML:** en una cadena con comillas dobles hay que duplicarlas (`"(\\d+) por ciento"`); con comillas simples se escriben tal cual (`'(\d+) por ciento' = '\1 %'`).
+- **Orden:** primero la subtabla `[replacements.<idioma>]` del idioma usado en el dictado (en modo `auto`, el detectado), después la tabla plana; cada una en el orden en que aparece en el archivo. Cada regla ve la salida de la anterior, así que el orden en el archivo importa. Las subtablas de un idioma que nunca usas no tienen efecto; cualquier nombre de idioma es válido.
+- **Texto vacío:** una regla puede borrar muletillas (`"eh+" = ""`). Si tras los reemplazos no queda texto, no se inserta ni se guarda nada y se registra `INFO` `Sin texto tras los reemplazos (... s, modelo/idioma).`.
+- **Historial y log:** `original` en el historial y la línea `Texto original: ...` siguen siendo el texto de Whisper; `text` es el final, con puntuación y reemplazos. Los patrones y reemplazos no se escriben en el log.
+- **Validación:** un valor que no sea texto, un patrón vacío, una regex que no compila (`"(" = "x"`), un reemplazo con un grupo inexistente (`"a" = "\\1"`) o un patrón que coincide con la cadena vacía (`"x*" = "y"`) hacen inválido el archivo; el error nombra `replacements.<clave>` (o `replacements.<idioma>.<clave>`) y la causa.
+- **Cuidado:** una regla demasiado amplia se come texto válido (`"a" = ""`); revisa `Texto original` o el historial para ver qué cambió. Una regex con retroceso catastrófico puede congelar la transcripción: las reglas las escribes tú, y los dictados son cortos.
+
 ## Niveles de log
 
 El nivel de la consola se elige con `--quiet`, `--verbose` o `--log-level` (excluyentes entre sí) y, si no se da ninguno, con `[log] level` (defecto `info`). El nivel del archivo `speechflow.log` solo se elige con `[log] file_level` (defecto `info`); las opciones de CLI no lo tocan, así que `--quiet` deja el archivo registrando igual que siempre.
@@ -347,6 +389,7 @@ idle_timeout = 0.0          # segundos sin dictar antes de liberar el modelo de 
 device = "auto"             # "auto": GPU si hay y funciona, si no CPU; "cpu": solo CPU; "cuda": solo GPU (falla si no hay)
 cpu_threads = 0             # hilos de CPU para Whisper; 0 usa el defecto de faster-whisper
 vad = true                  # filtra silencios y ruido sin voz antes de transcribir; false desactiva
+# initial_prompt = ""       # contexto para Whisper en cada dictado; ej.: "Hablo de GitHub, PyTorch y Kubernetes."; vacío = sin prompt
 
 [keys]
 record = "ctrl_r"
@@ -378,11 +421,17 @@ file_level = "info"         # nivel del archivo speechflow.log; las opciones de 
 [history]
 enabled = true              # guarda cada dictado en history.jsonl (texto en claro, permisos 0600); false no crea el archivo
 max_mb = 5.0                # tamaño máximo del archivo activo antes de rotar (se conservan 2 copias); mayor que 0
+
+[replacements]              # "regex" = "reemplazo"; ver "Diccionario de reemplazos e initial_prompt"
+# "git ?hub" = "GitHub"
+
+# [replacements.es]         # solo si el idioma del dictado es es; antes que la tabla plana
+# "cuber ?netis" = "Kubernetes"
 ```
 
 **Precedencia por valor:** argumento de CLI (solo si se escribió) > estado guardado (solo dispositivo e idioma) > archivo > defectos. En concreto, el dispositivo es `--device` > `state.toml` > `[audio] device` > el que contenga "Realtek", si no el del sistema, y el idioma es `--language` > `state.toml` > `[model] language` > `es`.
 
-**Validación:** una clave o sección desconocida, un tipo incorrecto, `min_seconds <= 0` o `max_seconds <= min_seconds` o `watch_interval < 1.0`, un `idle_timeout` distinto de 0 y menor que 30.0, un `device` que no sea `"auto"`, `"cpu"` ni `"cuda"` (el error nombra `model.device`), un `cpu_threads` negativo (nombra `model.cpu_threads`), un `mode` que no sea `"hold"` ni `"toggle"`, un `punctuation_commands` que no sea `true` ni `false` (por ejemplo `"si"`), un `[text] insert_method` que no sea `"clipboard"` ni `"type"` (el error nombra `text.insert_method`), un `[text] terminal_classes` que no sea una lista de textos no vacíos (nombra `text.terminal_classes`), o un `[log] level` o `[log] file_level` que no sea `"debug"`, `"info"`, `"warning"` ni `"error"` (el error nombra `log.level` o `log.file_level`), un `[history] enabled` que no sea `true` ni `false` (nombra `history.enabled`), o un `[history] max_mb` que no sea un número o sea menor o igual que 0 (nombra `history.max_mb`) hacen inválido el archivo. Las teclas se siguen validando al arrancar con mensajes `ERROR` que nombran la clave (`--key`, `--switch-key`, `[keys] language`, `[keys] auto`); si dos de las cuatro coinciden, el script sale con código 1 y nombra las dos.
+**Validación:** una clave o sección desconocida, un tipo incorrecto, `min_seconds <= 0` o `max_seconds <= min_seconds` o `watch_interval < 1.0`, un `idle_timeout` distinto de 0 y menor que 30.0, un `device` que no sea `"auto"`, `"cpu"` ni `"cuda"` (el error nombra `model.device`), un `cpu_threads` negativo (nombra `model.cpu_threads`), un `mode` que no sea `"hold"` ni `"toggle"`, un `punctuation_commands` que no sea `true` ni `false` (por ejemplo `"si"`), un `[text] insert_method` que no sea `"clipboard"` ni `"type"` (el error nombra `text.insert_method`), un `[text] terminal_classes` que no sea una lista de textos no vacíos (nombra `text.terminal_classes`), o un `[log] level` o `[log] file_level` que no sea `"debug"`, `"info"`, `"warning"` ni `"error"` (el error nombra `log.level` o `log.file_level`), un `[history] enabled` que no sea `true` ni `false` (nombra `history.enabled`), un `[history] max_mb` que no sea un número o sea menor o igual que 0 (nombra `history.max_mb`), un `[model] initial_prompt` que no sea texto (nombra `model.initial_prompt`), o un `[replacements]` inválido (nombra `replacements.<clave>`, ver [Diccionario de reemplazos e `initial_prompt`](#diccionario-de-reemplazos-e-initial_prompt)) hacen inválido el archivo. Las teclas se siguen validando al arrancar con mensajes `ERROR` que nombran la clave (`--key`, `--switch-key`, `[keys] language`, `[keys] auto`); si dos de las cuatro coinciden, el script sale con código 1 y nombra las dos.
 
 **Archivo de emergencia:** si no se encuentra ningún archivo, o el encontrado no se puede leer o no es válido, el script registra un `WARNING` con la causa, crea `config.emergency.toml` junto al archivo de configuración con todos los valores por defecto (sin sobrescribirlo si ya existe) y sigue con los defectos. El archivo inválido del usuario no se toca. La plantilla de emergencia no se lee nunca: cópiala o renómbrala a `config.toml` para usarla.
 

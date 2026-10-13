@@ -1,6 +1,6 @@
 # SPEC 27 — Diccionario de reemplazos e `initial_prompt`
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 10, SPEC 16, SPEC 18, SPEC 19, SPEC 21, SPEC 26
 > **Fecha:** 2026-10-13
 > **Objetivo:** Permitir que el usuario corrija el texto dictado con un diccionario de reemplazos por expresiones regulares (`[replacements]` en el TOML) y sesgue el vocabulario de Whisper con un `initial_prompt` configurable (`[model] initial_prompt`).
