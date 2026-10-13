@@ -516,3 +516,24 @@ class TestMainHistorial:
         avisos = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
         ruta = tmp_path / "xdg-state" / "speechflow" / "history.jsonl"
         assert any(m.startswith(f"No se puede escribir el historial en {ruta}: ") and m.endswith(". Se sigue sin historial.") for m in avisos)
+
+
+class TestSubcomandoService:
+    def test_delega_en_service_main_y_sale_con_su_codigo(self, monkeypatch):
+        """`speechflow service status` llama a service.main(['status']) y sale con su código, sin cargar nada."""
+        llamadas, _ = ejecutar_main(monkeypatch, [])
+        monkeypatch.setattr("sys.argv", ["speechflow", "service", "status"])
+        recibidos = []
+        monkeypatch.setattr(app.service, "main", lambda argv: recibidos.append(argv) or 3)
+        with pytest.raises(SystemExit) as salida:
+            app.main()
+        assert salida.value.code == 3
+        assert recibidos == [["status"]]
+        assert llamadas == []
+        assert EVENTOS_LOG == []
+
+    def test_la_ayuda_menciona_el_subcomando(self, monkeypatch, capsys):
+        monkeypatch.setattr("sys.argv", ["speechflow", "--help"])
+        with pytest.raises(SystemExit):
+            app.main()
+        assert "speechflow service --help" in capsys.readouterr().out
