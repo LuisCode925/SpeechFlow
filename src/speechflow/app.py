@@ -36,7 +36,7 @@ import sounddevice as sd
 from pynput import keyboard
 
 from speechflow import service
-from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, device_index, device_name, input_device_by_name, list_devices, next_input_device, parse_device, refresh_devices
+from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, device_index, device_name, input_device_by_name, input_devices, list_devices, next_input_device, parse_device, refresh_devices
 from speechflow.config import COMPUTE_DEVICES, LOG_LEVELS, Config, ConfigError, find_config, history_path, load_config, load_state_device, load_state_language, save_state_device, save_state_language, user_config_path, write_emergency
 from speechflow.history import HISTORY_BACKUP_COUNT, History
 from speechflow.inserter import insert_text
@@ -246,16 +246,21 @@ class PushToTalk:
             if new_device == device_index(self.recorder.device) and not self._device_missing:
                 logger.info(f"Solo hay un dispositivo de entrada: {describe_device(new_device)}")
                 return
-            self.recorder.device = new_device
-            logger.info(f"Entrada de audio cambiada: {describe_device(new_device)}")
-            name = sd.query_devices(new_device)["name"]
-            self._watched_name = name
-            self._device_missing = False
-            notify("SpeechFlow", f"Entrada de audio: {name}")
-            try:
-                save_state_device(name)
-            except (OSError, RuntimeError) as error:
-                logger.warning(f"No se pudo guardar la entrada de audio en state.toml: {error}")
+            self._apply_device(new_device)
+
+    def _apply_device(self, new_device: int) -> str:
+        """Fija el micrófono, lo registra, lo notifica y lo guarda; devuelve su nombre. Llamar con el lock tomado, en IDLE."""
+        self.recorder.device = new_device
+        logger.info(f"Entrada de audio cambiada: {describe_device(new_device)}")
+        name = sd.query_devices(new_device)["name"]
+        self._watched_name = name
+        self._device_missing = False
+        notify("SpeechFlow", f"Entrada de audio: {name}")
+        try:
+            save_state_device(name)
+        except (OSError, RuntimeError) as error:
+            logger.warning(f"No se pudo guardar la entrada de audio en state.toml: {error}")
+        return name
 
     def switch_language(self) -> None:
         """Alterna es <-> en (otro idioma pasa a es); desde auto fija el otro respecto al último fijo. Solo en IDLE."""
@@ -328,6 +333,103 @@ class PushToTalk:
                 self._loader.start()
         logger.info(f"Dictado reanudado: se carga {self.model_name} en segundo plano.")
         notify("SpeechFlow", "Dictado reanudado")
+
+    def control_status(self) -> dict:
+        """Estado para `status`: proceso, fase, pausa, modelo, idioma, modo y micrófono."""
+        with self._lock:
+            if self._loader is not None and self._loader.is_alive():
+                model_status = "loading"
+            elif self.transcriber is None:
+                model_status = "unloaded"
+            else:
+                model_status = "loaded"
+            index = device_index(self.recorder.device)
+            name = self._watched_name if self._watched_name is not None else device_name(self.recorder.device)
+            return {
+                "pid": os.getpid(),
+                "state": self.state.value,
+                "paused": self.paused,
+                "model": {"name": self.model_name, "status": model_status, "compute_device": self.compute_device},
+                "language": self.language,
+                "mode": self.mode,
+                "device": {"index": index, "name": name, "connected": not self._device_missing},
+            }
+
+    def control_set_language(self, value) -> str:
+        """Fija el idioma (`es`, `en` o `auto`) como la tecla; ControlError si es inválido o no se está en IDLE."""
+        if value not in (DEFAULT_LANGUAGE, "en", AUTO_LANGUAGE):
+            raise ControlError(f"idioma no válido: {value}")
+        with self._lock:
+            self._check_idle()
+            self._set_language(value)
+            return self.language
+
+    def control_devices(self) -> list[dict]:
+        """Dispositivos de entrada con `index`, `name` y `selected`; relee PortAudio solo si no hay stream abierto."""
+        with self._lock:
+            if self.state is State.IDLE and not self._closing:
+                try:
+                    refresh_devices()
+                except Exception as error:
+                    logger.debug(f"No se pudo releer los dispositivos de audio: {error}")
+            selected = device_index(self.recorder.device)
+            return [{"index": index, "name": sd.query_devices(index)["name"], "selected": index == selected} for index in input_devices()]
+
+    def control_set_device(self, value) -> dict:
+        """Cambia el micrófono (`next`, índice o nombre) como la tecla; devuelve `{"index", "name"}`."""
+        if isinstance(value, bool) or not isinstance(value, (int, str)) or value == "":
+            raise ControlError("petición inválida: value debe ser \"next\", un índice entero o un nombre")
+        with self._lock:
+            self._check_idle()
+            try:
+                refresh_devices()
+            except Exception as error:
+                raise ControlError(f"dispositivo no válido: no se pudieron releer los dispositivos de audio: {error}") from error
+            if value == "next":
+                new_device = next_input_device(self.recorder.device)
+                if new_device is None:
+                    raise ControlError("dispositivo no válido: no hay dispositivos de entrada disponibles")
+            else:
+                try:
+                    sd.query_devices(value, "input")
+                except (sd.PortAudioError, ValueError) as error:
+                    raise ControlError(f"dispositivo no válido: {error}") from error
+                new_device = device_index(value)
+                if new_device is None:
+                    raise ControlError(f"dispositivo no válido: {value}")
+            if new_device == device_index(self.recorder.device) and not self._device_missing:
+                logger.info(f"Entrada de audio sin cambios: {describe_device(new_device)}")
+                name = sd.query_devices(new_device)["name"]
+            else:
+                name = self._apply_device(new_device)
+            return {"index": new_device, "name": name}
+
+    def handle_control(self, request: dict) -> dict:
+        """Despachador del canal de control: convierte ControlError en `ok: false`."""
+        cmd = request.get("cmd")
+        if not isinstance(cmd, str):
+            return {"ok": False, "error": "petición inválida: falta el campo cmd (texto)"}
+        needs_value = cmd in ("language", "device")
+        if needs_value and request.get("value") is None:
+            return {"ok": False, "error": "petición inválida: falta el campo value"}
+        try:
+            if cmd == "status":
+                return {"ok": True, **self.control_status()}
+            if cmd == "pause":
+                self.pause()
+                return {"ok": True, "paused": True}
+            if cmd == "resume":
+                self.resume()
+                return {"ok": True, "paused": False}
+            if cmd == "language":
+                return {"ok": True, "language": self.control_set_language(request["value"])}
+            if cmd == "device":
+                return {"ok": True, "device": self.control_set_device(request["value"])}
+            if cmd == "devices":
+                return {"ok": True, "devices": self.control_devices()}
+        except ControlError as error:
+            return {"ok": False, "error": str(error)}
+        return {"ok": False, "error": f"comando desconocido: {cmd}"}
 
     def start_watcher(self, interval: float) -> None:
         """Lanza el hilo que comprueba cada `interval` s que el micrófono seleccionado sigue conectado."""

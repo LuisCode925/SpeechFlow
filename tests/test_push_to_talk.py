@@ -1,4 +1,5 @@
 """Tests de PushToTalk con dobles de Recorder, Transcriber, notify e insert_text."""
+import os
 import threading
 import time
 from datetime import datetime
@@ -1253,3 +1254,153 @@ class TestPausaControl:
         antes = ptt.recorder.device
         ptt.on_press(F)
         assert ptt.recorder.device != antes
+
+
+class TestCanalDeControl:
+    def test_status_campos(self, crear_ptt):
+        ptt = crear_ptt(device=1, compute_device="cuda", mode="toggle")
+        respuesta = ptt.handle_control({"cmd": "status"})
+        assert respuesta == {
+            "ok": True, "pid": os.getpid(), "state": "idle", "paused": False,
+            "model": {"name": "medium", "status": "loaded", "compute_device": "cuda"},
+            "language": "es", "mode": "toggle",
+            "device": {"index": 1, "name": "Realtek ALC", "connected": True},
+        }
+
+    def test_status_estados_del_modelo(self, crear_ptt, carga):
+        ptt = crear_ptt(transcriber=None)
+        assert ptt.control_status()["model"]["status"] == "unloaded"
+        ptt.on_press(R)  # lanza la recarga, bloqueada en `puerta`
+        estado = ptt.control_status()
+        assert estado["model"]["status"] == "loading" and estado["state"] == "recording"
+        carga.puerta.set()
+        ptt.on_release(R)
+        esperar_idle(ptt)
+        assert ptt.control_status()["model"]["status"] == "loaded"
+
+    def test_status_en_pausa_y_micro_desconectado(self, crear_ptt):
+        ptt = crear_ptt(device=1)
+        ptt.pause()
+        ptt._device_missing = True
+        estado = ptt.control_status()
+        assert estado["paused"] is True and estado["model"]["status"] == "unloaded"
+        assert estado["device"]["connected"] is False
+
+    def test_pause_y_resume_por_el_despachador(self, crear_ptt, carga):
+        carga.puerta.set()
+        ptt = crear_ptt()
+        assert ptt.handle_control({"cmd": "pause"}) == {"ok": True, "paused": True}
+        assert ptt.handle_control({"cmd": "pause"}) == {"ok": True, "paused": True}
+        assert ptt.handle_control({"cmd": "resume"}) == {"ok": True, "paused": False}
+        assert ptt.handle_control({"cmd": "resume"}) == {"ok": True, "paused": False}
+
+    def test_language(self, crear_ptt, dobles, caplog):
+        ptt = crear_ptt(language="es")
+        assert ptt.handle_control({"cmd": "language", "value": "en"}) == {"ok": True, "language": "en"}
+        assert ptt.language == "en" and config.load_state_language() == "en"
+        assert ("SpeechFlow", "Idioma: en") in dobles.notificaciones
+        assert "Idioma cambiado: en" in mensajes(caplog, "INFO")
+
+    def test_language_auto_conserva_el_ultimo_fijo(self, crear_ptt):
+        ptt = crear_ptt(language="en")
+        assert ptt.handle_control({"cmd": "language", "value": "auto"}) == {"ok": True, "language": "auto"}
+        assert config.load_state_language() == "auto" and ptt._last_fixed_language == "en"
+        ptt.on_press(A)  # la tecla vuelve al último fijo
+        assert ptt.language == "en"
+
+    @pytest.mark.parametrize("valor", ["fr", "", 3, ["es"]])
+    def test_language_invalido(self, crear_ptt, valor):
+        ptt = crear_ptt(language="es")
+        assert ptt.handle_control({"cmd": "language", "value": valor}) == {"ok": False, "error": f"idioma no válido: {valor}"}
+        assert ptt.language == "es"
+
+    @pytest.mark.parametrize("estado,mensaje", [(State.RECORDING, "ocupado: grabando"), (State.TRANSCRIBING, "ocupado: transcribiendo")])
+    def test_rechaza_fuera_de_idle(self, crear_ptt, estado, mensaje):
+        ptt = crear_ptt(device=1)
+        ptt.state = estado
+        for peticion in ({"cmd": "pause"}, {"cmd": "language", "value": "en"}, {"cmd": "device", "value": "next"}):
+            assert ptt.handle_control(peticion) == {"ok": False, "error": mensaje}
+        assert ptt.language == "es" and ptt.recorder.device == 1 and not ptt.paused
+
+    def test_devices(self, crear_ptt):
+        ptt = crear_ptt(device=1)
+        assert ptt.handle_control({"cmd": "devices"}) == {"ok": True, "devices": [
+            {"index": 1, "name": "Realtek ALC", "selected": True},
+            {"index": 2, "name": "USB Mic", "selected": False},
+        ]}
+
+    def test_devices_grabando_no_refresca_portaudio(self, crear_ptt, sounddevice_falso):
+        ptt = crear_ptt(device=1)
+        ptt.state = State.RECORDING
+        assert ptt.control_devices()[0]["selected"] is True
+        assert sounddevice_falso.reinicios == 0
+
+    def test_device_next_equivale_a_la_tecla(self, crear_ptt, dobles, caplog):
+        ptt = crear_ptt(device=1)
+        assert ptt.handle_control({"cmd": "device", "value": "next"}) == {"ok": True, "device": {"index": 2, "name": "USB Mic"}}
+        assert ptt.recorder.device == 2 and ptt._watched_name == "USB Mic"
+        assert f"Entrada de audio cambiada: {DESCRIPCION_USB}" in mensajes(caplog)
+        assert ("SpeechFlow", "Entrada de audio: USB Mic") in dobles.notificaciones
+        assert config.load_state_device() == "USB Mic"
+        otra = crear_ptt(device=1)
+        otra.switch_device()
+        assert otra.recorder.device == ptt.recorder.device
+
+    def test_device_por_indice_y_por_nombre(self, crear_ptt, dobles):
+        ptt = crear_ptt(device=1)
+        assert ptt.handle_control({"cmd": "device", "value": 2})["device"] == {"index": 2, "name": "USB Mic"}
+        assert config.load_state_device() == "USB Mic"
+        assert ptt.handle_control({"cmd": "device", "value": "realtek"})["device"] == {"index": 1, "name": "Realtek ALC"}
+        assert ptt.recorder.device == 1 and config.load_state_device() == "Realtek ALC"
+        assert ("SpeechFlow", "Entrada de audio: Realtek ALC") in dobles.notificaciones
+
+    def test_device_ya_seleccionado_no_cambia_nada(self, crear_ptt, dobles):
+        ptt = crear_ptt(device=1)
+        assert ptt.handle_control({"cmd": "device", "value": 1}) == {"ok": True, "device": {"index": 1, "name": "Realtek ALC"}}
+        assert dobles.notificaciones == [] and config.load_state_device() is None
+
+    @pytest.mark.parametrize("valor", [99, 0, "no existe"])
+    def test_device_invalido(self, crear_ptt, valor):
+        ptt = crear_ptt(device=1)
+        respuesta = ptt.handle_control({"cmd": "device", "value": valor})
+        assert respuesta["ok"] is False and respuesta["error"].startswith("dispositivo no válido: ")
+        assert ptt.recorder.device == 1 and config.load_state_device() is None
+
+    def test_device_nombre_ambiguo(self, crear_ptt, sounddevice_falso, monkeypatch):
+        sounddevice_falso.dispositivos.append(dispositivo("USB Mic 2"))
+        original = sd.query_devices
+
+        def estricto(device=None, kind=None):
+            if isinstance(device, str) and len([d for d in sounddevice_falso.dispositivos if device.lower() in d["name"].lower()]) > 1:
+                raise ValueError(f"Multiple input devices found for {device!r}")
+            return original(device, kind)
+
+        monkeypatch.setattr(sd, "query_devices", estricto)
+        ptt = crear_ptt(device=1)
+        respuesta = ptt.handle_control({"cmd": "device", "value": "usb"})
+        assert respuesta["ok"] is False and respuesta["error"].startswith("dispositivo no válido: Multiple")
+        assert ptt.recorder.device == 1
+
+    @pytest.mark.parametrize("valor", [True, 1.5, "", ["next"]])
+    def test_device_valor_de_tipo_incorrecto(self, crear_ptt, valor):
+        ptt = crear_ptt(device=1)
+        respuesta = ptt.handle_control({"cmd": "device", "value": valor})
+        assert respuesta["ok"] is False and respuesta["error"].startswith("petición inválida")
+
+    @pytest.mark.parametrize("cmd", ["language", "device"])
+    def test_value_ausente(self, crear_ptt, cmd):
+        ptt = crear_ptt()
+        respuesta = ptt.handle_control({"cmd": cmd})
+        assert respuesta["ok"] is False and respuesta["error"].startswith("petición inválida")
+
+    def test_comando_desconocido_o_sin_cmd(self, crear_ptt):
+        ptt = crear_ptt()
+        assert ptt.handle_control({"cmd": "bailar"}) == {"ok": False, "error": "comando desconocido: bailar"}
+        assert ptt.handle_control({})["error"].startswith("petición inválida")
+        assert ptt.handle_control({"cmd": 3})["error"].startswith("petición inválida")
+
+    def test_en_cierre(self, crear_ptt):
+        ptt = crear_ptt()
+        ptt.begin_shutdown()
+        assert ptt.handle_control({"cmd": "language", "value": "en"}) == {"ok": False, "error": "cierre en curso"}
+        assert ptt.handle_control({"cmd": "device", "value": "next"}) == {"ok": False, "error": "cierre en curso"}
