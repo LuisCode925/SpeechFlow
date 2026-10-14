@@ -35,7 +35,7 @@ from pathlib import Path
 import sounddevice as sd
 from pynput import keyboard
 
-from speechflow import service
+from speechflow import control, service
 from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, device_index, device_name, input_device_by_name, input_devices, list_devices, next_input_device, parse_device, refresh_devices
 from speechflow.config import COMPUTE_DEVICES, LOG_LEVELS, Config, ConfigError, find_config, history_path, load_config, load_state_device, load_state_language, save_state_device, save_state_language, user_config_path, write_emergency
 from speechflow.history import HISTORY_BACKUP_COUNT, History
@@ -762,15 +762,30 @@ def resolve_config(explicit: Path | None) -> Config:
     return Config()
 
 
+def start_control_server(handler) -> control.ControlServer | None:
+    """Arranca el canal de control. Sin XDG_RUNTIME_DIR, con otra instancia escuchando o ante cualquier error: WARNING y None."""
+    try:
+        path = control.socket_path()
+        server = control.ControlServer(handler, path)
+        server.start()
+    except (RuntimeError, OSError) as error:
+        logger.warning(f"Canal de control desactivado: {error}")
+        return None
+    logger.info(f"Canal de control: {path}")
+    return server
+
+
 def main() -> None:
     if sys.argv[1:2] == ["service"]:
         sys.exit(service.main(sys.argv[2:]))
+    if sys.argv[1:2] == ["ctl"]:
+        sys.exit(control.main(sys.argv[2:]))
     defaults = Config()
     try:
         config_default = user_config_path()
     except RuntimeError:  # sin HOME
         config_default = "~/.config/speechflow/config.toml"
-    parser = argparse.ArgumentParser(prog="speechflow", description=__doc__, epilog="Para instalarlo como servicio de systemd --user: speechflow service --help")
+    parser = argparse.ArgumentParser(prog="speechflow", description=__doc__, epilog="Para instalarlo como servicio de systemd --user: speechflow service --help. Para controlar el proceso en marcha (estado, pausa, idioma, micrófono): speechflow ctl --help")
     parser.add_argument("--list-devices", action="store_true", help="lista los dispositivos de entrada y termina")
     parser.add_argument("--device", type=parse_device, help=f"índice o nombre del dispositivo de entrada (defecto: el que contenga '{PREFERRED_DEVICE}', si no el del sistema)")
     parser.add_argument("--model", help=f"modelo de faster-whisper (defecto: {DEFAULT_CPU_MODEL} en CPU, {DEFAULT_MODEL} en GPU)")
@@ -904,6 +919,7 @@ def main() -> None:
 
     for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
         signal.signal(signum, on_signal)
+    control_server = start_control_server(push_to_talk.handle_control)
     listener.start()
     # listener.stop() desde el manejador no hace volver a listener.join() (probado); se espera al evento y se detiene aquí
     while not closing.wait(1.0) and listener.running:
@@ -914,6 +930,8 @@ def main() -> None:
     else:
         logger.info("Saliendo.")
     push_to_talk.stop_watcher()
+    if control_server is not None:
+        control_server.close()
     push_to_talk.begin_shutdown()
     listener.stop()  # sin join: a veces pynput no despierta su hilo tras stop(); es daemon y no retiene el proceso
     if push_to_talk.shutdown():

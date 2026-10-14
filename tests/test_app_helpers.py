@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from pynput import keyboard
 
-from speechflow import app, config
+from speechflow import app, config, control
 from speechflow.config import Config
 from speechflow.transcriber import SAMPLE_RATE
 
@@ -537,3 +537,87 @@ class TestSubcomandoService:
         with pytest.raises(SystemExit):
             app.main()
         assert "speechflow service --help" in capsys.readouterr().out
+
+    def test_la_ayuda_menciona_ctl(self, monkeypatch, capsys):
+        monkeypatch.setattr("sys.argv", ["speechflow", "--help"])
+        with pytest.raises(SystemExit):
+            app.main()
+        assert "speechflow ctl --help" in capsys.readouterr().out
+
+
+class TestSubcomandoCtl:
+    def test_delega_en_control_main_y_sale_con_su_codigo(self, monkeypatch):
+        """`speechflow ctl status` llama a control.main(['status']) sin cargar configuración ni modelo."""
+        llamadas, _ = ejecutar_main(monkeypatch, [])
+        monkeypatch.setattr("sys.argv", ["speechflow", "ctl", "status"])
+        recibidos = []
+        monkeypatch.setattr(app.control, "main", lambda argv: recibidos.append(argv) or 3)
+        with pytest.raises(SystemExit) as salida:
+            app.main()
+        assert salida.value.code == 3
+        assert recibidos == [["status"]]
+        assert llamadas == []
+        assert EVENTOS_LOG == []
+
+
+class TestCanalDeControlEnMain:
+    def test_sin_xdg_runtime_dir_avisa_y_sigue(self, monkeypatch, caplog):
+        monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+        with caplog.at_level("INFO", logger="speechflow"):
+            assert app.start_control_server(lambda request: {"ok": True}) is None
+        avisos = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+        assert len(avisos) == 1 and avisos[0].startswith("Canal de control desactivado: ") and "XDG_RUNTIME_DIR" in avisos[0]
+
+    def test_otra_instancia_escuchando_avisa_y_no_toca_su_socket(self, monkeypatch, caplog):
+        import shutil
+        import tempfile
+        from pathlib import Path
+
+        directorio = Path(tempfile.mkdtemp(prefix="sf"))
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(directorio))
+        primera = app.start_control_server(lambda request: {"ok": True, "quien": 1})
+        try:
+            assert primera is not None
+            with caplog.at_level("INFO", logger="speechflow"):
+                assert app.start_control_server(lambda request: {"ok": True, "quien": 2}) is None
+            assert any(r.levelname == "WARNING" and "Canal de control desactivado" in r.getMessage() for r in caplog.records)
+            assert control.send_request({"cmd": "x"})["quien"] == 1
+        finally:
+            primera.close()
+            shutil.rmtree(directorio, ignore_errors=True)
+
+    def test_orden_en_main_servidor_antes_del_listener_y_cierre_antes_de_begin_shutdown(self, monkeypatch):
+        eventos = []
+        t = type("T", (), {"device": "cpu", "model_name": "small"})()
+        ejecutar_main(monkeypatch, [], t)
+
+        class PttFalso:
+            def __init__(self, *args):
+                eventos.append("ptt")
+
+            def handle_control(self, request):
+                return {"ok": True}
+
+            def start_watcher(self, interval): pass
+            def stop_watcher(self): pass
+            def on_press(self, key): pass
+            def on_release(self, key): pass
+            def begin_shutdown(self): eventos.append("begin_shutdown")
+            def shutdown(self): return False
+
+        class ListenerFalso:
+            running = False
+
+            def __init__(self, **kwargs): pass
+            def start(self): eventos.append("listener.start")
+            def stop(self): eventos.append("listener.stop")
+
+        class ServidorFalso:
+            def close(self): eventos.append("servidor.close")
+
+        monkeypatch.setattr(app, "PushToTalk", PttFalso)
+        monkeypatch.setattr(app.keyboard, "Listener", ListenerFalso)
+        monkeypatch.setattr(app, "start_control_server", lambda handler: eventos.append("servidor.start") or ServidorFalso())
+        monkeypatch.setattr(app.signal, "signal", lambda *a: None)
+        app.main()
+        assert eventos == ["ptt", "servidor.start", "listener.start", "servidor.close", "begin_shutdown", "listener.stop"]
