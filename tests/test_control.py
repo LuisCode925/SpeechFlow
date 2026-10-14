@@ -183,3 +183,118 @@ def test_importar_no_crea_archivos(runtime):
 
     importlib.reload(control)
     assert list(runtime.iterdir()) == []
+
+
+# --- speechflow ctl ---------------------------------------------------------------------------
+
+STATUS = {
+    "ok": True, "pid": 1234, "state": "idle", "paused": False,
+    "model": {"name": "large-v3-turbo", "status": "loaded", "compute_device": "cuda"},
+    "language": "es", "mode": "hold", "device": {"index": 7, "name": "Blue Yeti", "connected": True},
+}
+
+
+@pytest.fixture
+def peticiones(monkeypatch):
+    """Sustituye send_request por un doble: devuelve `respuesta` y registra las peticiones."""
+    class Registro(list):
+        estado: dict
+
+    registro = Registro()
+    estado = {"respuesta": {"ok": True}, "error": None}
+
+    def falso(request, timeout=10.0):
+        registro.append(request)
+        if estado["error"]:
+            raise estado["error"]
+        return estado["respuesta"]
+
+    monkeypatch.setattr(control, "send_request", falso)
+    registro.estado = estado
+    return registro
+
+
+def test_ctl_status_legible(peticiones, capsys):
+    peticiones.estado["respuesta"] = STATUS
+    assert control.main(["status"]) == 0
+    out = capsys.readouterr().out
+    assert peticiones == [{"cmd": "status"}]
+    for texto in ("idle", "large-v3-turbo", "loaded", "cuda", "es", "hold", "Blue Yeti"):
+        assert texto in out
+    assert len(out.splitlines()) > 1
+
+
+def test_ctl_json_imprime_la_respuesta_cruda(peticiones, capsys):
+    peticiones.estado["respuesta"] = STATUS
+    assert control.main(["status", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == STATUS
+
+
+def test_ctl_pause_y_resume(peticiones, capsys):
+    peticiones.estado["respuesta"] = {"ok": True, "paused": True}
+    assert control.main(["pause"]) == 0
+    assert "pausa" in capsys.readouterr().out
+    peticiones.estado["respuesta"] = {"ok": True, "paused": False}
+    assert control.main(["resume"]) == 0
+    assert "reanudado" in capsys.readouterr().out
+    assert peticiones == [{"cmd": "pause"}, {"cmd": "resume"}]
+
+
+def test_ctl_language(peticiones, capsys):
+    peticiones.estado["respuesta"] = {"ok": True, "language": "en"}
+    assert control.main(["language", "en"]) == 0
+    assert peticiones == [{"cmd": "language", "value": "en"}]
+    assert "en" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("argumento,valor", [("next", "next"), ("3", 3), ("USB", "USB")])
+def test_ctl_device_envia_el_valor(peticiones, capsys, argumento, valor):
+    peticiones.estado["respuesta"] = {"ok": True, "device": {"index": 3, "name": "USB Audio"}}
+    assert control.main(["device", argumento]) == 0
+    assert peticiones == [{"cmd": "device", "value": valor}]
+    assert "USB Audio" in capsys.readouterr().out
+
+
+def test_ctl_devices(peticiones, capsys):
+    peticiones.estado["respuesta"] = {"ok": True, "devices": [
+        {"index": 3, "name": "USB Audio", "selected": False},
+        {"index": 7, "name": "Blue Yeti", "selected": True},
+    ]}
+    assert control.main(["devices"]) == 0
+    lineas = capsys.readouterr().out.splitlines()
+    assert len(lineas) == 2
+    assert lineas[1].startswith("*") and "Blue Yeti" in lineas[1]
+
+
+def test_ctl_error_del_servidor_sale_con_1(peticiones, capsys):
+    peticiones.estado["respuesta"] = {"ok": False, "error": "ocupado: grabando"}
+    assert control.main(["pause"]) == 1
+    assert "ocupado: grabando" in capsys.readouterr().err
+
+
+def test_ctl_error_con_json_sale_con_1(peticiones, capsys):
+    peticiones.estado["respuesta"] = {"ok": False, "error": "idioma no válido: fr"}
+    assert control.main(["language", "fr", "--json"]) == 1
+    assert json.loads(capsys.readouterr().out)["ok"] is False
+
+
+def test_ctl_sin_proceso_sale_con_3(runtime, peticiones, capsys):
+    peticiones.estado["error"] = control.ControlUnavailable("no hay socket")
+    assert control.main(["status"]) == 3
+    err = capsys.readouterr().err
+    assert "SpeechFlow no está en ejecución" in err
+    assert str(control.socket_path()) in err
+
+
+def test_ctl_uso_incorrecto_sale_con_2(peticiones, capsys):
+    assert control.main([]) == 2
+    assert "status" in capsys.readouterr().err
+    assert control.main(["bailar"]) == 2
+    assert control.main(["language"]) == 2
+    assert control.main(["device"]) == 2
+    assert peticiones == []
+
+
+def test_ctl_help_sale_con_0(capsys):
+    assert control.main(["--help"]) == 0
+    assert "status" in capsys.readouterr().out

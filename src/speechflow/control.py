@@ -1,15 +1,16 @@
 """Canal de control por socket Unix: servidor de una línea JSON por conexión y cliente para `speechflow ctl`."""
+import argparse
 import json
 import logging
 import os
 import socket
+import sys
 import threading
 from collections.abc import Callable
 from pathlib import Path
 
-from speechflow.log import LOGGER_NAME
-
-logger = logging.getLogger(LOGGER_NAME)
+# Mismo nombre que log.LOGGER_NAME; no se importa `speechflow.log` porque arrastra faster_whisper (`ctl` debe arrancar al instante).
+logger = logging.getLogger("speechflow")
 
 MAX_REQUEST_BYTES = 4096
 READ_TIMEOUT = 2.0
@@ -168,3 +169,90 @@ def send_request(request: dict, timeout: float = 10.0) -> dict:
         return json.loads(line.decode("utf-8"))
     finally:
         sock.close()
+
+
+def _format_status(response: dict) -> str:
+    model = response.get("model", {})
+    device = response.get("device", {})
+    connected = "" if device.get("connected", True) else " (desconectado)"
+    return "\n".join([
+        f"Estado:   {response.get('state')}" + (" (en pausa)" if response.get("paused") else ""),
+        f"Pausa:    {'sí' if response.get('paused') else 'no'}",
+        f"Modelo:   {model.get('name')} [{model.get('status')}, {model.get('compute_device')}]",
+        f"Idioma:   {response.get('language')}",
+        f"Modo:     {response.get('mode')}",
+        f"Micrófono: [{device.get('index')}] {device.get('name')}{connected}",
+        f"PID:      {response.get('pid')}",
+    ])
+
+
+def _format_devices(response: dict) -> str:
+    return "\n".join(
+        f"{'*' if item.get('selected') else ' '} [{item.get('index')}] {item.get('name')}" for item in response.get("devices", [])
+    )
+
+
+def _summary(cmd: str, response: dict) -> str:
+    """Resumen legible de una respuesta correcta."""
+    if cmd == "status":
+        return _format_status(response)
+    if cmd == "devices":
+        return _format_devices(response)
+    if cmd in ("pause", "resume"):
+        return "Dictado en pausa." if response.get("paused") else "Dictado reanudado."
+    if cmd == "language":
+        return f"Idioma: {response.get('language')}"
+    device = response.get("device", {})
+    return f"Micrófono: [{device.get('index')}] {device.get('name')}"
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="speechflow ctl", description="Controla un proceso speechflow en ejecución por su socket Unix.")
+    sub = parser.add_subparsers(dest="command", metavar="{status,pause,resume,language,device,devices}")
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--json", action="store_true", help="imprime la respuesta cruda del servidor")
+    sub.add_parser("status", parents=[common], help="estado del proceso")
+    sub.add_parser("pause", parents=[common], help="pausa el dictado y libera el modelo")
+    sub.add_parser("resume", parents=[common], help="reanuda el dictado y recarga el modelo")
+    language = sub.add_parser("language", parents=[common], help="fija el idioma")
+    language.add_argument("value", help="es, en o auto")
+    device = sub.add_parser("device", parents=[common], help="cambia el micrófono")
+    device.add_argument("value", help="next, un índice o un nombre/subcadena")
+    sub.add_parser("devices", parents=[common], help="lista los dispositivos de entrada")
+    return parser
+
+
+def main(argv: list[str]) -> int:
+    """Cuerpo de `speechflow ctl`. Salida: 0 ok, 1 `ok: false`, 2 uso incorrecto, 3 sin proceso escuchando."""
+    parser = _build_parser()
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exit:
+        return exit.code if isinstance(exit.code, int) else 0
+    if args.command is None:
+        parser.print_help(sys.stderr)
+        return 2
+    request: dict = {"cmd": args.command}
+    if "value" in args:
+        value = args.value
+        request["value"] = int(value) if args.command == "device" and value.isdecimal() else value
+    try:
+        response = send_request(request)
+    except ControlUnavailable:
+        try:
+            where = socket_path()
+        except RuntimeError:
+            where = "(XDG_RUNTIME_DIR no está definida)"
+        print(f"SpeechFlow no está en ejecución: no hay socket en {where}.", file=sys.stderr)
+        return 3
+    except (OSError, ValueError) as error:
+        print(f"Error de comunicación con SpeechFlow: {error}", file=sys.stderr)
+        return 1
+    ok = bool(response.get("ok"))
+    if args.json:
+        print(json.dumps(response, ensure_ascii=False))
+    elif ok:
+        print(_summary(args.command, response))
+    else:
+        print(f"Error: {response.get('error', 'error desconocido')}", file=sys.stderr)
+    return 0 if ok else 1
