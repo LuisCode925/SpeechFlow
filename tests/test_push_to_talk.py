@@ -1113,3 +1113,143 @@ class TestHistorial:
         assert ptt.history is None
         self.dictar(ptt)
         assert dobles.textos == ["hola mundo"]
+
+
+class TestPausaControl:
+    def test_pause_libera_el_modelo_y_cancela_el_temporizador(self, crear_ptt, dobles, caplog):
+        transcriber = TranscriberFalso()
+        ptt = crear_ptt(transcriber=transcriber, idle_timeout=30.0)
+        assert ptt._idle_timer is not None
+        ptt.pause()
+        assert ptt.paused and ptt.transcriber is None and transcriber.cierres == 1
+        assert ptt._idle_timer is None
+        assert ("SpeechFlow", "Dictado en pausa") in dobles.notificaciones
+        assert any(m.startswith("Dictado en pausa") for m in mensajes(caplog, "INFO"))
+
+    def test_pause_con_el_modelo_ya_descargado_solo_marca(self, crear_ptt):
+        ptt = crear_ptt(transcriber=None)
+        ptt.pause()
+        assert ptt.paused and ptt.transcriber is None
+
+    def test_pause_es_idempotente(self, crear_ptt, dobles):
+        transcriber = TranscriberFalso()
+        ptt = crear_ptt(transcriber=transcriber)
+        ptt.pause()
+        ptt.pause()
+        assert ptt.paused and transcriber.cierres == 1
+        assert dobles.notificaciones.count(("SpeechFlow", "Dictado en pausa")) == 1
+
+    def test_pause_grabando_se_rechaza_sin_alterar_la_grabacion(self, crear_ptt):
+        transcriber = TranscriberFalso()
+        ptt = crear_ptt(transcriber=transcriber)
+        ptt.on_press(R)
+        with pytest.raises(app.ControlError, match="^ocupado: grabando$"):
+            ptt.pause()
+        assert not ptt.paused and ptt.state is State.RECORDING and ptt.recorder.active
+        assert transcriber.cierres == 0
+
+    def test_pause_transcribiendo_se_rechaza(self, crear_ptt):
+        transcriber = TranscriberFalso(bloquear=True)
+        ptt = crear_ptt(transcriber=transcriber)
+        ptt.on_press(R)
+        ptt.on_release(R)
+        assert transcriber.entro.wait(2)
+        with pytest.raises(app.ControlError, match="^ocupado: transcribiendo$"):
+            ptt.pause()
+        assert not ptt.paused
+        transcriber.liberar.set()
+        esperar_idle(ptt)
+
+    def test_pause_con_recarga_en_curso_se_rechaza(self, crear_ptt, carga):
+        ptt = crear_ptt(transcriber=None)
+        ptt.on_press(R)
+        ptt.recorder.segundos = 0.01
+        ptt.on_release(R)
+        esperar_idle(ptt)
+        assert ptt._loader.is_alive()
+        with pytest.raises(app.ControlError, match="^ocupado: cargando el modelo$"):
+            ptt.pause()
+        assert not ptt.paused
+
+    def test_pause_y_resume_en_cierre(self, crear_ptt):
+        ptt = crear_ptt()
+        ptt.begin_shutdown()
+        with pytest.raises(app.ControlError, match="^cierre en curso$"):
+            ptt.pause()
+        with pytest.raises(app.ControlError, match="^cierre en curso$"):
+            ptt.resume()
+
+    def test_resume_lanza_la_recarga_sin_esperar(self, crear_ptt, carga, dobles, caplog):
+        ptt = crear_ptt(transcriber=TranscriberFalso())
+        ptt.pause()
+        inicio = time.monotonic()
+        ptt.resume()  # la carga sigue bloqueada en `puerta`
+        assert time.monotonic() - inicio < 1
+        assert not ptt.paused and ptt._loader.is_alive() and ptt.transcriber is None
+        assert ("SpeechFlow", "Dictado reanudado") in dobles.notificaciones
+        assert any(m.startswith("Dictado reanudado") for m in mensajes(caplog, "INFO"))
+        carga.puerta.set()
+        esperar(lambda: ptt.transcriber is carga.creados[0] if carga.creados else False)
+        assert carga.llamadas == [("medium", "es", True)]
+
+    def test_resume_es_idempotente(self, crear_ptt, carga):
+        ptt = crear_ptt(transcriber=TranscriberFalso())
+        ptt.resume()  # sin pausa previa: no hace nada
+        assert carga.llamadas == [] and not ptt.paused
+        ptt.pause()
+        carga.puerta.set()
+        ptt.resume()
+        ptt.resume()
+        esperar(lambda: ptt.transcriber is not None)
+        assert len(carga.llamadas) == 1
+
+    def test_resume_tras_fallo_de_recarga_deja_el_error_y_se_reintenta_al_pulsar(self, crear_ptt, carga, caplog):
+        carga.puerta.set()
+        carga.error = RuntimeError("sin VRAM")
+        ptt = crear_ptt(transcriber=TranscriberFalso())
+        ptt.pause()
+        ptt.resume()
+        esperar(lambda: "Error al recargar el modelo: sin VRAM" in mensajes(caplog, "ERROR"))
+        assert ptt.transcriber is None and not ptt.paused
+        carga.error = None
+        ptt.on_press(R)
+        assert ptt.state is State.RECORDING
+        esperar(lambda: ptt.transcriber is not None)  # la pulsación reintentó la carga
+        assert len(carga.llamadas) == 2
+        ptt.on_release(R)
+        esperar_idle(ptt)
+
+    def test_en_pausa_la_tecla_no_graba_y_avisa(self, crear_ptt, caplog):
+        ptt = crear_ptt()
+        ptt.pause()
+        ptt.on_press(R)
+        ptt.on_release(R)
+        assert ptt.state is State.IDLE and ptt.recorder.inicios == 0
+        assert "Dictado en pausa; reanúdalo con: speechflow ctl resume." in mensajes(caplog, "WARNING")
+
+    def test_en_pausa_con_modo_toggle_tampoco_graba(self, crear_ptt):
+        ptt = crear_ptt(mode="toggle")
+        ptt.pause()
+        ptt.on_press(R)
+        assert ptt.state is State.IDLE and ptt.recorder.inicios == 0
+
+    def test_tras_resume_la_tecla_vuelve_a_grabar(self, crear_ptt, carga, dobles):
+        carga.puerta.set()
+        ptt = crear_ptt(transcriber=TranscriberFalso())
+        ptt.pause()
+        ptt.resume()
+        esperar(lambda: ptt.transcriber is not None)
+        ptt.on_press(R)
+        ptt.on_release(R)
+        assert dobles.insertado.wait(2)
+
+    def test_en_pausa_siguen_activas_las_teclas_de_idioma_y_dispositivo(self, crear_ptt, sounddevice_falso):
+        ptt = crear_ptt(language="es")
+        ptt.pause()
+        ptt.on_press(L)
+        assert ptt.language == "en"
+        ptt.on_press(A)
+        assert ptt.language == "auto"
+        antes = ptt.recorder.device
+        ptt.on_press(F)
+        assert ptt.recorder.device != antes

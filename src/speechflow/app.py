@@ -51,6 +51,10 @@ logger = logging.getLogger(LOGGER_NAME)
 SHUTDOWN_TIMEOUT = 30.0  # segundos máximos de espera al cerrar
 
 
+class ControlError(Exception):
+    """Error de una orden del canal de control; el mensaje va tal cual al campo `error` de la respuesta."""
+
+
 class State(Enum):
     IDLE = "idle"
     RECORDING = "recording"
@@ -113,6 +117,7 @@ class PushToTalk:
         self._closing = False  # True desde begin_shutdown(); las teclas se ignoran
         self._load_error: Exception | None = None  # fallo de la última recarga
         self.state = State.IDLE
+        self.paused = False  # dictado en pausa por el canal de control; no se persiste
         self._held = False  # la tecla sigue pulsada; filtra las repeticiones automáticas
         self._switch_held = False  # ídem para la tecla de cambio
         self._language_held = False  # ídem para la tecla de idioma
@@ -150,6 +155,9 @@ class PushToTalk:
         with self._lock:
             was_held, self._held = self._held, True
             if was_held:
+                return
+            if self.paused:
+                logger.warning("Dictado en pausa; reanúdalo con: speechflow ctl resume.")
                 return
             if self.mode == "toggle" and self.state is State.RECORDING:
                 stopping = True
@@ -280,6 +288,46 @@ class PushToTalk:
             save_state_language(new_language)
         except (OSError, RuntimeError) as error:
             logger.warning(f"No se pudo guardar el idioma en state.toml: {error}")
+
+    def _check_idle(self) -> None:
+        """Lanza ControlError si no se puede cambiar el estado ahora. Llamar con el lock tomado."""
+        if self._closing:
+            raise ControlError("cierre en curso")
+        if self.state is State.RECORDING:
+            raise ControlError("ocupado: grabando")
+        if self.state is State.TRANSCRIBING:
+            raise ControlError("ocupado: transcribiendo")
+
+    def pause(self) -> None:
+        """Pausa el dictado y libera el modelo; solo en IDLE y sin recarga en curso (ControlError si no). Idempotente."""
+        with self._lock:
+            self._check_idle()
+            if self.paused:
+                return
+            if self._loader is not None and self._loader.is_alive():
+                raise ControlError("ocupado: cargando el modelo")
+            self.paused = True
+            self._cancel_idle_timer()
+            if self.transcriber is not None:
+                self.transcriber.close()
+                self.transcriber = None
+        logger.info(f"Dictado en pausa: modelo {self.model_name} liberado.")
+        notify("SpeechFlow", "Dictado en pausa")
+
+    def resume(self) -> None:
+        """Reanuda el dictado y recarga el modelo en segundo plano sin esperar. Idempotente."""
+        with self._lock:
+            if self._closing:
+                raise ControlError("cierre en curso")
+            if not self.paused:
+                return
+            self.paused = False
+            if self.transcriber is None and (self._loader is None or not self._loader.is_alive()):
+                self._load_error = None
+                self._loader = threading.Thread(target=self._load_model, daemon=True)
+                self._loader.start()
+        logger.info(f"Dictado reanudado: se carga {self.model_name} en segundo plano.")
+        notify("SpeechFlow", "Dictado reanudado")
 
     def start_watcher(self, interval: float) -> None:
         """Lanza el hilo que comprueba cada `interval` s que el micrófono seleccionado sigue conectado."""
