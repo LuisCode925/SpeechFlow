@@ -1,6 +1,6 @@
 # SPEC 29 — Canal de control por socket Unix
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 08, SPEC 10, SPEC 12, SPEC 15, SPEC 19, SPEC 22, SPEC 28
 > **Fecha:** 2026-10-13
 > **Objetivo:** Añadir un socket Unix de control (JSON de una línea) y el subcomando `speechflow ctl` para consultar el estado, pausar y reanudar el dictado (la pausa libera el modelo), cambiar el idioma y cambiar o listar los dispositivos de entrada de un proceso `speechflow` en ejecución.

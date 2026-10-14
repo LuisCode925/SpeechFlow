@@ -35,7 +35,7 @@ Valor medio:
 Base para la GUI:
 
 - [x] ~~9. Daemon y servicio `systemd` de usuario (la GUI o bandeja será cliente del proceso).~~ (SPEC 28, `speechflow service install`)
-- [ ] 10. Canal de control (socket Unix o señales): pausar, cambiar idioma o dispositivo, consultar estado. Es la dependencia real de la GUI.
+- [x] ~~10. Canal de control (socket Unix o señales): pausar, cambiar idioma o dispositivo, consultar estado. Es la dependencia real de la GUI.~~ (SPEC 29, `speechflow ctl`)
 - [x] ~~11. Fallback a CPU si falla CUDA, para que el servicio no muera al arrancar.~~ (SPEC 22, `[model] device = "auto"`)
 
 Pueden esperar: soporte Wayland y reducción de ruido.
@@ -46,8 +46,8 @@ Pueden esperar: soporte Wayland y reducción de ruido.
 - [ ] Streaming de la captura y de la transcripción (SPEC 03, 04, 05).
 - [ ] Reducción de ruido (SPEC 03).
 - [x] ~~Persistencia del dispositivo de audio elegido entre ejecuciones (SPEC 08).~~ (SPEC 10)
-- [ ] Cambio de dispositivo por otros medios: stdin, señales, bandeja o menú gráfico (SPEC 08).
-- [ ] Retroceder en la rotación, elegir por índice o por nombre en caliente, y listas de rotación configurables (SPEC 08).
+- [ ] Cambio de dispositivo por otros medios: stdin, señales, bandeja o menú gráfico (SPEC 08). Cubierto por el socket (SPEC 29, `speechflow ctl device`); quedan señales, bandeja y menú gráfico.
+- [ ] Retroceder en la rotación, ~~elegir por índice o por nombre en caliente~~ (SPEC 29, `ctl device`), y listas de rotación configurables (SPEC 08).
 - [ ] Cambio automático al conectar, desconectar o fallar un dispositivo (SPEC 08).
 - [ ] Diferir el cambio de dispositivo hasta que el estado sea `IDLE` (SPEC 08).
 - [ ] Comprobar que el dispositivo abre al cambiarlo (SPEC 08).
@@ -71,6 +71,12 @@ Pueden esperar: soporte Wayland y reducción de ruido.
 ## Ejecución en segundo plano
 
 - [ ] Bandeja del sistema (SPEC 01, 03, 04, 05).
+- [ ] Acelerar el arranque de `speechflow ctl` (SPEC 29). Hoy tarda ~0,75 s (`import speechflow.control` solo tarda ~30 ms) porque `main()` está en `app.py`, cuyo import (~0,67 s) ocurre antes de delegar. Reparto del import: `speechflow.audio` ~480 ms (arrastra `scipy.signal`), `speechflow.config` → `transcriber` → `faster_whisper` ~120 ms, más `sounddevice` y `pynput`. Opciones, de menos a más cambio:
+  - Despachar `ctl` antes de importar `app`: módulo ligero (`speechflow/cli.py` o `__main__.py`) que mira `sys.argv` e importa `app` solo si no es `ctl`, y entry point de `pyproject.toml` apuntando a él. Deja `ctl` en ~50 ms sin tocar `audio.py` ni `transcriber.py`. Opción recomendada.
+  - Imports perezosos: `scipy` dentro de `resample()`, `faster_whisper` dentro de `Transcriber`, `sounddevice` y `pynput` al usarse. Toca `audio.py` y `transcriber.py` y también acelera el arranque normal del servicio.
+  - Entry point aparte `speechflowctl`: mismo efecto que despachar antes, pero duplica el empaquetado (descartado en la SPEC 29).
+  - Cliente que no sea Python (script con `socat` o binario pequeño): arranque en milisegundos, pero añade una dependencia y pierde el formato legible.
+  - GUI o bandeja hablando directamente con el socket: el arranque de `ctl` deja de importar para el uso interactivo.
 - [x] ~~Daemon, arranque automático y `systemd` (SPEC 03, 04, 05).~~ (SPEC 28)
 - [x] ~~Descarga del modelo por inactividad y recarga bajo demanda (SPEC 06).~~ (SPEC 12)
 - [x] ~~Esperar a una transcripción en curso al salir (SPEC 06).~~ (SPEC 15)

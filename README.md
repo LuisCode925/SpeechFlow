@@ -378,6 +378,89 @@ speechflow service uninstall   # desactiva, para y borra la unidad
 - **Entorno movido o borrado:** si cambias de sitio o borras el entorno conda, la unidad queda apuntando a una ruta inexistente; vuelve a ejecutar `speechflow service install` desde el entorno nuevo.
 - **Requisitos del servicio:** `install` falla con código 1 si falta `systemctl` o si la ruta del Python o del entorno contiene espacios o `%`.
 
+## Canal de control
+
+El proceso en marcha escucha en un socket Unix y `speechflow ctl` lo consulta y lo maneja desde otra terminal. Sirve sobre todo con el [servicio de usuario](#servicio-de-usuario), que corre sin terminal. La futura GUI o bandeja será un cliente de este mismo canal.
+
+```bash
+speechflow ctl status              # estado, modelo, idioma, modo y micrófono
+speechflow ctl pause               # pausa el dictado y libera el modelo (VRAM)
+speechflow ctl resume              # reanuda y recarga el modelo en segundo plano
+speechflow ctl language en         # es, en o auto
+speechflow ctl device next         # next, un índice o un nombre/subcadena
+speechflow ctl device realtek
+speechflow ctl devices             # lista los micrófonos; * marca el seleccionado
+speechflow ctl status --json       # respuesta cruda del servidor (vale para todos los comandos)
+```
+
+Salida de `speechflow ctl status`:
+
+```text
+Estado:   idle
+Pausa:    no
+Modelo:   medium [loaded, cuda]
+Idioma:   es
+Modo:     hold
+Micrófono: [9] Realtek Audio USB: Audio (hw:3,0)
+PID:      122334
+```
+
+- **Pausa:** `pause` libera el modelo, así que la GPU queda libre mientras no dictas; en pausa la tecla de dictado no graba y avisa con `Dictado en pausa; reanúdalo con: speechflow ctl resume.`. `resume` responde al instante y `status` pasa por `loading` y `loaded` en unos segundos. La pausa no se guarda: el proceso siempre arranca activo. Las teclas de idioma y de cambio de entrada siguen funcionando en pausa.
+- **Solo en reposo:** `pause`, `language` y `device` se rechazan mientras se graba o se transcribe (`ocupado: grabando`, `ocupado: transcribiendo`), y `pause` también durante una recarga del modelo (`ocupado: cargando el modelo`). Reintenta al terminar.
+- **Idioma y micrófono:** funcionan como sus teclas: se registran en el log, se notifican y se guardan en `state.toml`. `device` con un índice o un nombre inexistente, que no sea de entrada o ambiguo devuelve `dispositivo no válido: …` (p. ej. `Multiple input devices found for 'Loopback'`).
+- **Siempre activo:** no hay clave en el TOML. Si no se puede crear el socket (sin `XDG_RUNTIME_DIR`, ruta de más de 108 bytes) o ya hay otra instancia escuchando, el arranque registra un `WARNING` (`Canal de control desactivado: …`) y el dictado sigue sin canal. Nunca se borra el socket de una instancia viva; uno huérfano (tras `kill -9`) se reemplaza al arrancar.
+- **Seguridad:** el socket está en `$XDG_RUNTIME_DIR/speechflow/control.sock` (normalmente `/run/user/<uid>/speechflow/control.sock`), con el directorio en `0700` y el socket en `0600`. No hay más autenticación que esos permisos.
+
+### Códigos de salida de `ctl`
+
+| Código | Significado |
+| --- | --- |
+| 0 | El servidor respondió `ok: true` |
+| 1 | El servidor respondió `ok: false` (el mensaje va a stderr) |
+| 2 | Uso incorrecto: sin comando, comando desconocido o falta el argumento (se muestra la ayuda) |
+| 3 | No hay proceso escuchando: `SpeechFlow no está en ejecución: no hay socket en <ruta>.` |
+
+### Protocolo JSON
+
+Una petición por conexión, un objeto JSON en una línea terminada en `\n` (UTF-8, máximo 4096 bytes; el servidor espera la línea hasta 2 s). El servidor responde con otra línea JSON y cierra. Los campos desconocidos se ignoran en ambos sentidos.
+
+```json
+{"cmd": "status"}
+{"cmd": "language", "value": "en"}
+{"cmd": "device", "value": "next"}
+```
+
+`cmd` es `status`, `pause`, `resume`, `language` (`value`: `es`, `en` o `auto`), `device` (`value`: `next`, un índice entero o un nombre) o `devices`. Las respuestas correctas llevan `"ok": true`; las de error, `"ok": false` y `"error"` en español:
+
+```json
+{"ok": true, "pid": 122334, "state": "idle", "paused": false, "model": {"name": "medium", "status": "loaded", "compute_device": "cuda"}, "language": "es", "mode": "hold", "device": {"index": 9, "name": "Realtek Audio USB: Audio (hw:3,0)", "connected": true}}
+{"ok": true, "paused": true}
+{"ok": true, "language": "en"}
+{"ok": true, "device": {"index": 4, "name": "HD-Audio Generic: ALC1220 Analog (hw:1,0)"}}
+{"ok": true, "devices": [{"index": 4, "name": "HD-Audio Generic: ALC1220 Analog (hw:1,0)", "selected": false}, {"index": 9, "name": "Realtek Audio USB: Audio (hw:3,0)", "selected": true}]}
+{"ok": false, "error": "idioma no válido: fr"}
+```
+
+- **`state`:** `idle`, `recording` o `transcribing`. **`model.status`:** `loaded`, `loading` o `unloaded`. **`language`:** `es`, `en` o `auto`. **`mode`:** `hold` o `toggle`.
+- **Errores fijos:** `ocupado: grabando`, `ocupado: transcribiendo`, `ocupado: cargando el modelo`, `cierre en curso`, `idioma no válido: <valor>`, `dispositivo no válido: <causa>`, `comando desconocido: <cmd>` y `petición inválida: <causa>` (JSON inválido, línea de más de 4096 bytes, falta `value`...). Un error nunca cierra el proceso.
+
+A mano, sin `speechflow ctl`:
+
+```bash
+echo '{"cmd":"status"}' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/speechflow/control.sock
+echo '{"cmd":"status"}' | nc -U -q1 $XDG_RUNTIME_DIR/speechflow/control.sock   # nc de OpenBSD (netcat-openbsd)
+```
+
+`socat` no viene instalado por defecto, y el `nc` de Debian (`nc.traditional`) no admite `-U`; instala `socat` o `netcat-openbsd`. Con solo Python:
+
+```bash
+python -c 'import os, socket; s = socket.socket(socket.AF_UNIX); s.connect(os.environ["XDG_RUNTIME_DIR"] + "/speechflow/control.sock"); s.sendall(b"{\"cmd\": \"status\"}\n"); print(s.recv(65536).decode())'
+```
+
+Con el servicio activo, cada orden queda en el log: `journalctl --user -u speechflow -f`.
+
+- **Arranque de `ctl`:** hoy `speechflow ctl` tarda ~0,75 s porque el comando carga `app.py` completo (`sounddevice`, `pynput`, `faster_whisper`) antes de delegar; el módulo `speechflow.control` en sí no importa nada de eso.
+
 ## Configuración
 
 La app de push-to-talk lee un archivo TOML opcional (solo ella; `capture_mic.py`, `benchmark_stt.py` y `--list-devices` no lo usan). Se usa el primero que exista, sin fusionar:
