@@ -1,6 +1,6 @@
 # SPEC 31 — Extensión de GNOME Shell para el panel
 
-> **Estado:** Borrador
+> **Estado:** Aprobado
 > **Depende de:** SPEC 28, SPEC 29, SPEC 30
 > **Fecha:** 2026-10-20
 > **Objetivo:** Añadir una extensión de GNOME Shell 48 (JavaScript) que muestre en el panel un icono con el estado de `speechflow` y un menú para pausar, cambiar el idioma y el micrófono, y abrir la configuración, más el subcomando `speechflow ext install|uninstall|status` que la instala.
