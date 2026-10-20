@@ -44,9 +44,11 @@ function isCancelled(error) {
 
 const Indicator = GObject.registerClass(
 class Indicator extends PanelMenu.Button {
-    _init(onCommand) {
+    _init(onCommand, onDevices) {
         super._init(0.0, 'SpeechFlow');
         this._onCommand = onCommand;
+        this._onDevices = onDevices;
+        this._devicesRequest = 0;
         this._css = null;
         this._icon = new St.Icon({
             icon_name: ICON_NORMAL,
@@ -71,6 +73,40 @@ class Indicator extends PanelMenu.Button {
             this._languageItems.set(code, item);
         }
         this.menu.addMenuItem(this._languageMenu);
+
+        this._deviceMenu = new PopupMenu.PopupSubMenuMenuItem('Micrófono');
+        this._deviceMenu.menu.connect('open-state-changed', (menu, open) => {
+            if (open)
+                this._refreshDevices();
+        });
+        this.menu.addMenuItem(this._deviceMenu);
+    }
+
+    _setDeviceMessage(text) {
+        this._deviceMenu.menu.removeAll();
+        this._deviceMenu.menu.addMenuItem(new PopupMenu.PopupMenuItem(text, {reactive: false}));
+    }
+
+    /** Pide `devices` al abrir el submenú; una respuesta tardía de una apertura anterior se descarta. */
+    async _refreshDevices() {
+        const request = ++this._devicesRequest;
+        this._setDeviceMessage('Cargando…');
+        const devices = await this._onDevices();
+        if (request !== this._devicesRequest)
+            return;
+        if (devices === null) {
+            this._setDeviceMessage('No disponible');
+            return;
+        }
+        this._deviceMenu.menu.removeAll();
+        if (devices.length === 0)
+            this._setDeviceMessage('Sin dispositivos de entrada');
+        for (const device of devices) {
+            const item = new PopupMenu.PopupMenuItem(`[${device.index}] ${device.name}`);
+            item.setOrnament(device.selected ? PopupMenu.Ornament.DOT : PopupMenu.Ornament.NONE);
+            item.connect('activate', () => this._onCommand({cmd: 'device', value: device.index}));
+            this._deviceMenu.menu.addMenuItem(item);
+        }
     }
 
     setStatus(status) {
@@ -90,6 +126,7 @@ class Indicator extends PanelMenu.Button {
         this._pauseItem.visible = status !== null;
         this._pauseItem.label.text = this._paused ? 'Reanudar dictado' : 'Pausar dictado';
         this._languageMenu.visible = status !== null;
+        this._deviceMenu.visible = status !== null;
         for (const [code, item] of this._languageItems)
             item.setOrnament(status?.language === code ? PopupMenu.Ornament.DOT : PopupMenu.Ornament.NONE);
     }
@@ -102,7 +139,7 @@ export default class SpeechFlowExtension extends Extension {
         this._connection = null;
         this._status = null;
         this._pending = new Set();
-        this._indicator = new Indicator(request => this._runCommand(request));
+        this._indicator = new Indicator(request => this._runCommand(request), () => this._fetchDevices());
         this._indicator.setStatus(null);
         Main.panel.addToStatusArea(this.uuid, this._indicator);
         this._connect();
@@ -175,6 +212,20 @@ export default class SpeechFlowExtension extends Extension {
                 return;
             Main.notify('SpeechFlow', `No se pudo enviar el comando: ${error.message}`);
         }
+    }
+
+    /** Lista de dispositivos de `devices`, o null si no se pudo obtener (se avisa con `Main.notify`). */
+    async _fetchDevices() {
+        try {
+            const response = await this._command({cmd: 'devices'});
+            if (response.ok)
+                return response.devices ?? [];
+            Main.notify('SpeechFlow', response.error ?? 'error desconocido');
+        } catch (error) {
+            if (this._cancellable)
+                Main.notify('SpeechFlow', `No se pudo obtener los micrófonos: ${error.message}`);
+        }
+        return null;
     }
 
     _connect() {
