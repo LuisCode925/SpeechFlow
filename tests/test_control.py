@@ -427,3 +427,44 @@ def test_excepcion_en_status_no_mata_el_publicador(servidor, rapido):
         fallos.clear()
         handler.estado["state"] = "recording"
         assert _linea(sock)["state"] == "recording"
+
+
+def test_el_noveno_suscriptor_se_rechaza(servidor, rapido):
+    server = servidor(EstadoMutable())
+    socks = [_suscribir(control.socket_path()) for _ in range(control.MAX_SUBSCRIBERS)]
+    try:
+        for sock in socks:
+            assert _linea(sock)["event"] == "status"
+        with _suscribir(control.socket_path()) as noveno:
+            assert _linea(noveno) == {"ok": False, "error": "demasiados suscriptores"}
+            assert noveno.recv(1) == b""
+        assert len(server._subscribers) == control.MAX_SUBSCRIBERS
+        assert control.send_request({"cmd": "status"}) == ESTADO  # el proceso sigue atendiendo
+    finally:
+        for sock in socks:
+            sock.close()
+
+
+def test_suscriptor_cerrado_libera_su_plaza(servidor, rapido):
+    server = servidor(EstadoMutable())
+    socks = [_suscribir(control.socket_path()) for _ in range(control.MAX_SUBSCRIBERS)]
+    for sock in socks:
+        _linea(sock)
+    socks.pop().close()
+    assert _esperar(lambda: len(server._subscribers) == control.MAX_SUBSCRIBERS - 1)
+    with _suscribir(control.socket_path()) as nuevo:
+        assert _linea(nuevo)["event"] == "status"
+    for sock in socks:
+        sock.close()
+
+
+def test_close_envia_eof_a_los_suscriptores_y_borra_el_socket(servidor, rapido):
+    server = servidor(EstadoMutable())
+    path = control.socket_path()
+    with _suscribir(path) as uno, _suscribir(path) as dos:
+        _linea(uno), _linea(dos)
+        server.close()
+        assert uno.recv(1) == b""
+        assert dos.recv(1) == b""
+    assert not path.exists()
+    assert not _publicador_vivo()
