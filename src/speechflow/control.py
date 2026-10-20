@@ -275,6 +275,27 @@ def send_request(request: dict, timeout: float = 10.0) -> dict:
         sock.close()
 
 
+def _open_subscription() -> socket.socket:
+    """Conecta y envía `subscribe`; el socket queda sin timeout de lectura. ControlUnavailable si no hay proceso."""
+    try:
+        path = socket_path()
+    except RuntimeError as error:
+        raise ControlUnavailable(str(error)) from error
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        sock.settimeout(10.0)
+        try:
+            sock.connect(str(path))
+        except (FileNotFoundError, ConnectionRefusedError) as error:
+            raise ControlUnavailable(f"no hay socket en {path}") from error
+        sock.sendall(_encode({"cmd": "subscribe"}))
+        sock.settimeout(None)
+    except BaseException:
+        sock.close()
+        raise
+    return sock
+
+
 def _format_status(response: dict) -> str:
     model = response.get("model", {})
     device = response.get("device", {})
@@ -310,12 +331,59 @@ def _summary(cmd: str, response: dict) -> str:
     return f"Micrófono: [{device.get('index')}] {device.get('name')}"
 
 
+def _unavailable() -> int:
+    try:
+        where = socket_path()
+    except RuntimeError:
+        where = "(XDG_RUNTIME_DIR no está definida)"
+    print(f"SpeechFlow no está en ejecución: no hay socket en {where}.", file=sys.stderr)
+    return 3
+
+
+def _watch(as_json: bool) -> int:
+    """`ctl watch`: imprime cada línea de la suscripción. 0 con Ctrl+C, 1 si el servidor cierra o responde `ok: false`."""
+    try:
+        sock = _open_subscription()
+    except ControlUnavailable:
+        return _unavailable()
+    except OSError as error:
+        print(f"Error de comunicación con SpeechFlow: {error}", file=sys.stderr)
+        return 1
+    first = True
+    try:
+        with sock, sock.makefile("rb") as stream:
+            for raw in stream:
+                try:
+                    response = json.loads(raw.decode("utf-8"))
+                except ValueError as error:
+                    print(f"Error de comunicación con SpeechFlow: {error}", file=sys.stderr)
+                    return 1
+                if not response.get("ok"):
+                    print(f"Error: {response.get('error', 'error desconocido')}", file=sys.stderr)
+                    return 1
+                if as_json:
+                    print(raw.decode("utf-8").rstrip("\n"), flush=True)
+                else:
+                    if not first:
+                        print()
+                    print(_format_status(response), flush=True)
+                first = False
+    except KeyboardInterrupt:
+        return 0
+    except OSError as error:
+        print(f"Error de comunicación con SpeechFlow: {error}", file=sys.stderr)
+        return 1
+    print("SpeechFlow cerró la conexión.", file=sys.stderr)
+    return 1
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="speechflow ctl", description="Controla un proceso speechflow en ejecución por su socket Unix.")
-    sub = parser.add_subparsers(dest="command", metavar="{status,pause,resume,language,device,devices}")
+    sub = parser.add_subparsers(dest="command", metavar="{status,watch,pause,resume,language,device,devices}")
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="imprime la respuesta cruda del servidor")
     sub.add_parser("status", parents=[common], help="estado del proceso")
+    sub.add_parser("watch", parents=[common], help="muestra el estado al conectar y en cada cambio (Ctrl+C para salir)")
     sub.add_parser("pause", parents=[common], help="pausa el dictado y libera el modelo")
     sub.add_parser("resume", parents=[common], help="reanuda el dictado y recarga el modelo")
     language = sub.add_parser("language", parents=[common], help="fija el idioma")
@@ -327,7 +395,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str]) -> int:
-    """Cuerpo de `speechflow ctl`. Salida: 0 ok, 1 `ok: false`, 2 uso incorrecto, 3 sin proceso escuchando."""
+    """Cuerpo de `speechflow ctl`. Salida: 0 ok, 1 `ok: false` o servidor cerrado en `watch`, 2 uso incorrecto, 3 sin proceso escuchando."""
     parser = _build_parser()
     try:
         args = parser.parse_args(argv)
@@ -336,6 +404,8 @@ def main(argv: list[str]) -> int:
     if args.command is None:
         parser.print_help(sys.stderr)
         return 2
+    if args.command == "watch":
+        return _watch(args.json)
     request: dict = {"cmd": args.command}
     if "value" in args:
         value = args.value
@@ -343,12 +413,7 @@ def main(argv: list[str]) -> int:
     try:
         response = send_request(request)
     except ControlUnavailable:
-        try:
-            where = socket_path()
-        except RuntimeError:
-            where = "(XDG_RUNTIME_DIR no está definida)"
-        print(f"SpeechFlow no está en ejecución: no hay socket en {where}.", file=sys.stderr)
-        return 3
+        return _unavailable()
     except (OSError, ValueError) as error:
         print(f"Error de comunicación con SpeechFlow: {error}", file=sys.stderr)
         return 1

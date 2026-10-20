@@ -468,3 +468,84 @@ def test_close_envia_eof_a_los_suscriptores_y_borra_el_socket(servidor, rapido):
         assert dos.recv(1) == b""
     assert not path.exists()
     assert not _publicador_vivo()
+
+
+# --- ctl watch ---
+
+def _lanzar_watch(argumentos):
+    """Ejecuta `control.main(["watch", ...])` en un hilo y devuelve (hilo, resultado)."""
+    resultado = {}
+
+    def correr():
+        resultado["codigo"] = control.main(["watch", *argumentos])
+
+    hilo = threading.Thread(target=correr, daemon=True)
+    hilo.start()
+    return hilo, resultado
+
+
+def test_ctl_watch_sale_con_1_si_el_servidor_se_detiene(servidor, rapido):
+    server = servidor(EstadoMutable())
+    hilo, resultado = _lanzar_watch([])
+    assert _esperar(lambda: len(server._subscribers) == 1)
+    server.close()
+    hilo.join(timeout=3)
+    assert resultado["codigo"] == 1
+
+
+def test_ctl_watch_texto_separa_entradas_con_linea_en_blanco(servidor, rapido, capsys):
+    handler = EstadoMutable()
+    server = servidor(handler)
+    hilo, resultado = _lanzar_watch([])
+    assert _esperar(lambda: len(server._subscribers) == 1)
+    time.sleep(0.1)
+    handler.estado["paused"] = True
+    time.sleep(0.3)
+    server.close()
+    hilo.join(timeout=3)
+    captured = capsys.readouterr()
+    entradas = captured.out.strip().split("\n\n")
+    assert len(entradas) == 2
+    assert "(en pausa)" not in entradas[0] and "(en pausa)" in entradas[1]
+    assert "cerró la conexión" in captured.err
+    assert resultado["codigo"] == 1
+
+
+def test_ctl_watch_json_imprime_lineas_crudas(servidor, rapido, capsys):
+    handler = EstadoMutable()
+    server = servidor(handler)
+    hilo, resultado = _lanzar_watch(["--json"])
+    assert _esperar(lambda: len(server._subscribers) == 1)
+    time.sleep(0.1)
+    handler.estado["state"] = "recording"
+    time.sleep(0.3)
+    server.close()
+    hilo.join(timeout=3)
+    lineas = [json.loads(linea) for linea in capsys.readouterr().out.splitlines()]
+    assert lineas == [{**ESTADO, "event": "status"}, {**ESTADO, "state": "recording", "event": "status"}]
+
+
+def test_ctl_watch_ctrl_c_sale_con_0(servidor, monkeypatch):
+    servidor(EstadoMutable())
+
+    def interrumpir(response):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(control, "_format_status", interrumpir)
+    assert control.main(["watch"]) == 0
+
+
+def test_ctl_watch_sin_proceso_sale_con_3(runtime, capsys):
+    assert control.main(["watch"]) == 3
+    assert "SpeechFlow no está en ejecución" in capsys.readouterr().err
+
+
+def test_ctl_watch_con_error_de_status_sale_con_1(servidor, capsys):
+    servidor(lambda request: {"ok": False, "error": "no disponible"})
+    assert control.main(["watch"]) == 1
+    assert "no disponible" in capsys.readouterr().err
+
+
+def test_ctl_help_lista_watch(capsys):
+    assert control.main(["--help"]) == 0
+    assert "watch" in capsys.readouterr().out
