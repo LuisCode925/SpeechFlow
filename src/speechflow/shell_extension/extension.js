@@ -6,8 +6,14 @@ import St from 'gi://St';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
+import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
+
+Gio._promisify(Gio.SocketClient.prototype, 'connect_async', 'connect_finish');
+Gio._promisify(Gio.OutputStream.prototype, 'write_all_async', 'write_all_finish');
+Gio._promisify(Gio.DataInputStream.prototype, 'read_line_async', 'read_line_finish_utf8');
 
 const RETRY_SECONDS = 3;
+const COMMAND_TIMEOUT_SECONDS = 10;
 const ICON_NORMAL = 'audio-input-microphone-symbolic';
 const ICON_PAUSED = 'microphone-disabled-symbolic';
 
@@ -37,14 +43,23 @@ function isCancelled(error) {
 
 const Indicator = GObject.registerClass(
 class Indicator extends PanelMenu.Button {
-    _init() {
+    _init(onCommand) {
         super._init(0.0, 'SpeechFlow');
+        this._onCommand = onCommand;
         this._css = null;
         this._icon = new St.Icon({
             icon_name: ICON_NORMAL,
             style_class: 'system-status-icon',
         });
         this.add_child(this._icon);
+
+        this._statusItem = new PopupMenu.PopupMenuItem('', {reactive: false});
+        this._detailItem = new PopupMenu.PopupMenuItem('', {reactive: false});
+        this._pauseItem = new PopupMenu.PopupMenuItem('');
+        this._pauseItem.connect('activate', () => this._onCommand({cmd: this._paused ? 'resume' : 'pause'}));
+        this.menu.addMenuItem(this._statusItem);
+        this.menu.addMenuItem(this._detailItem);
+        this.menu.addMenuItem(this._pauseItem);
     }
 
     setStatus(status) {
@@ -55,6 +70,14 @@ class Indicator extends PanelMenu.Button {
         this._css = view.css;
         if (this._css)
             this._icon.add_style_class_name(this._css);
+
+        this._paused = Boolean(status?.paused);
+        this._statusItem.label.text = view.text;
+        this._detailItem.visible = status !== null;
+        if (status !== null)
+            this._detailItem.label.text = `${status.model?.name ?? '?'} · ${status.model?.compute_device ?? '?'} · ${status.model?.status ?? '?'}`;
+        this._pauseItem.visible = status !== null;
+        this._pauseItem.label.text = this._paused ? 'Reanudar dictado' : 'Pausar dictado';
     }
 });
 
@@ -64,7 +87,8 @@ export default class SpeechFlowExtension extends Extension {
         this._retrySource = null;
         this._connection = null;
         this._status = null;
-        this._indicator = new Indicator();
+        this._pending = new Set();
+        this._indicator = new Indicator(request => this._runCommand(request));
         this._indicator.setStatus(null);
         Main.panel.addToStatusArea(this.uuid, this._indicator);
         this._connect();
@@ -73,6 +97,9 @@ export default class SpeechFlowExtension extends Extension {
     disable() {
         this._cancellable?.cancel();
         this._cancellable = null;
+        for (const cancellable of this._pending)
+            cancellable.cancel();
+        this._pending = null;
         if (this._retrySource !== null) {
             GLib.source_remove(this._retrySource);
             this._retrySource = null;
@@ -85,6 +112,55 @@ export default class SpeechFlowExtension extends Extension {
 
     _socketPath() {
         return GLib.build_filenamev([GLib.get_user_runtime_dir(), 'speechflow', 'control.sock']);
+    }
+
+    /**
+     * Envía una petición por una conexión nueva y devuelve la respuesta ya analizada.
+     * Plazo de 10 s; `disable()` la cancela. Lanza si no hay conexión o respuesta.
+     */
+    async _command(request) {
+        const cancellable = new Gio.Cancellable();
+        this._pending.add(cancellable);
+        let timer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, COMMAND_TIMEOUT_SECONDS, () => {
+            timer = null;
+            cancellable.cancel();
+            return GLib.SOURCE_REMOVE;
+        });
+        let connection = null;
+        try {
+            const address = Gio.UnixSocketAddress.new(this._socketPath());
+            connection = await new Gio.SocketClient().connect_async(address, cancellable);
+            await connection.get_output_stream().write_all_async(new TextEncoder().encode(`${JSON.stringify(request)}\n`), GLib.PRIORITY_DEFAULT, cancellable);
+            const input = new Gio.DataInputStream({base_stream: connection.get_input_stream()});
+            const [line] = await input.read_line_async(GLib.PRIORITY_DEFAULT, cancellable);
+            if (line === null)
+                throw new Error('el servicio cerró la conexión sin responder');
+            return JSON.parse(line);
+        } finally {
+            if (timer !== null)
+                GLib.source_remove(timer);
+            this._pending?.delete(cancellable);
+            connection?.close_async(GLib.PRIORITY_DEFAULT, null, (source, result) => {
+                try {
+                    source.close_finish(result);
+                } catch (error) {
+                    // ya estaba cerrada
+                }
+            });
+        }
+    }
+
+    /** Ejecuta un comando desde el menú y avisa con `Main.notify` si falla. */
+    async _runCommand(request) {
+        try {
+            const response = await this._command(request);
+            if (!response.ok)
+                Main.notify('SpeechFlow', response.error ?? 'error desconocido');
+        } catch (error) {
+            if (!this._cancellable)  // deshabilitada mientras esperaba
+                return;
+            Main.notify('SpeechFlow', `No se pudo enviar el comando: ${error.message}`);
+        }
     }
 
     _connect() {
