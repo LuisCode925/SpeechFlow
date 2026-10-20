@@ -35,7 +35,7 @@ from pathlib import Path
 import sounddevice as sd
 from pynput import keyboard
 
-from speechflow import control, service
+from speechflow import control, ext, service
 from speechflow.audio import PREFERRED_DEVICE, Recorder, default_device, device_index, device_name, input_device_by_name, input_devices, list_devices, next_input_device, parse_device, refresh_devices
 from speechflow.config import COMPUTE_DEVICES, LOG_LEVELS, Config, ConfigError, find_config, history_path, load_config, load_state_device, load_state_language, save_state_device, save_state_language, user_config_path, write_emergency
 from speechflow.history import HISTORY_BACKUP_COUNT, History
@@ -778,6 +778,8 @@ def start_control_server(handler) -> control.ControlServer | None:
 def main() -> None:
     if sys.argv[1:2] == ["service"]:
         sys.exit(service.main(sys.argv[2:]))
+    if sys.argv[1:2] == ["ext"]:
+        sys.exit(ext.main(sys.argv[2:]))
     if sys.argv[1:2] == ["ctl"]:
         sys.exit(control.main(sys.argv[2:]))
     defaults = Config()
@@ -785,7 +787,7 @@ def main() -> None:
         config_default = user_config_path()
     except RuntimeError:  # sin HOME
         config_default = "~/.config/speechflow/config.toml"
-    parser = argparse.ArgumentParser(prog="speechflow", description=__doc__, epilog="Para instalarlo como servicio de systemd --user: speechflow service --help. Para controlar el proceso en marcha (estado, pausa, idioma, micrófono): speechflow ctl --help")
+    parser = argparse.ArgumentParser(prog="speechflow", description=__doc__, epilog="Para instalarlo como servicio de systemd --user: speechflow service --help. Para el icono en GNOME Shell: speechflow ext --help. Para controlar el proceso en marcha (estado, pausa, idioma, micrófono): speechflow ctl --help")
     parser.add_argument("--list-devices", action="store_true", help="lista los dispositivos de entrada y termina")
     parser.add_argument("--device", type=parse_device, help=f"índice o nombre del dispositivo de entrada (defecto: el que contenga '{PREFERRED_DEVICE}', si no el del sistema)")
     parser.add_argument("--model", help=f"modelo de faster-whisper (defecto: {DEFAULT_CPU_MODEL} en CPU, {DEFAULT_MODEL} en GPU)")

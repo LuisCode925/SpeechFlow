@@ -27,6 +27,9 @@ version = { attr = "speechflow.__version__" }
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+speechflow = ["shell_extension/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-m 'not gpu'"

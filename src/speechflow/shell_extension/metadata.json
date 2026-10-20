@@ -1,0 +1,7 @@
+{
+  "uuid": "speechflow@local",
+  "name": "SpeechFlow",
+  "description": "Icono en el panel con el estado de speechflow y un menú para controlarlo.",
+  "shell-version": ["48"],
+  "version": 1
+}
