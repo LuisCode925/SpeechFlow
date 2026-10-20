@@ -3,6 +3,7 @@ import argparse
 import json
 import logging
 import os
+import select
 import socket
 import sys
 import threading
@@ -14,6 +15,7 @@ logger = logging.getLogger("speechflow")
 
 MAX_REQUEST_BYTES = 4096
 READ_TIMEOUT = 2.0
+PUBLISH_INTERVAL = 0.25    # s entre muestras de status mientras haya suscriptores
 SEND_TIMEOUT = 1.0         # s máximos para escribir a un suscriptor
 _ACCEPT_POLL = 0.2
 
@@ -63,6 +65,8 @@ class ControlServer:
         self._stop = threading.Event()
         self._subscribers: list[socket.socket] = []
         self._subscribers_lock = threading.Lock()
+        self._publisher: threading.Thread | None = None
+        self._last_status: dict | None = None
 
     def start(self) -> None:
         """Crea el directorio (0700) y el socket (0600) y empieza a atender. OSError si no puede crearse."""
@@ -164,8 +168,62 @@ class ControlServer:
         if subscribed:
             with self._subscribers_lock:
                 self._subscribers.append(conn)
+                # La foto enviada pasa a ser la referencia: si el estado ya cambió, el próximo tick lo envía a todos.
+                self._last_status = {key: value for key, value in response.items() if key != "event"}
+                if self._publisher is None:
+                    self._publisher = threading.Thread(target=self._publish, name="control-publisher", daemon=True)
+                    self._publisher.start()
             logger.debug("Suscriptor de control añadido")
         return subscribed
+
+    def _publish(self) -> None:
+        """Muestrea `status` cada PUBLISH_INTERVAL y lo envía a los suscriptores si cambió. Termina al quedar sin ninguno."""
+        while not self._stop.wait(PUBLISH_INTERVAL):
+            self._drop(self._closed_subscribers())
+            with self._subscribers_lock:
+                if not self._subscribers:
+                    self._publisher = None
+                    return
+            try:
+                status = self._handler({"cmd": "status"})
+            except Exception:
+                logger.debug("Error muestreando el estado para los suscriptores", exc_info=True)
+                continue
+            if not status.get("ok") or status == self._last_status:
+                continue
+            self._last_status = status
+            line = _encode({**status, "event": "status"})
+            with self._subscribers_lock:
+                targets = list(self._subscribers)
+            failed = []
+            for conn in targets:
+                try:
+                    conn.sendall(line)
+                except OSError:
+                    failed.append(conn)
+            self._drop(failed)
+
+    def _closed_subscribers(self) -> list[socket.socket]:
+        """Suscriptores cuyo extremo se cerró (legible y `recv` devuelve b'') o que fallan al consultarlos."""
+        with self._subscribers_lock:
+            targets = list(self._subscribers)
+        closed = []
+        for conn in targets:
+            try:
+                # select evita el poll interno de recv con timeout, que esperaría SEND_TIMEOUT por suscriptor.
+                if select.select([conn], [], [], 0)[0] and conn.recv(1) == b"":
+                    closed.append(conn)
+            except OSError:
+                closed.append(conn)
+        return closed
+
+    def _drop(self, conns: list[socket.socket]) -> None:
+        for conn in conns:
+            with self._subscribers_lock:
+                if conn in self._subscribers:
+                    self._subscribers.remove(conn)
+            conn.close()
+            logger.debug("Suscriptor de control descartado")
 
 
 def _is_alive(path: Path) -> bool:

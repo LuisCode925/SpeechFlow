@@ -4,6 +4,7 @@ import shutil
 import socket
 import stat
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -350,3 +351,79 @@ def test_subscribe_con_error_de_status_cierra_la_conexion(servidor):
         assert _linea(sock) == {"ok": False, "error": "no disponible"}
         assert sock.recv(1) == b""
     assert server._subscribers == []
+
+
+class EstadoMutable:
+    """`handler` doble: devuelve el estado actual, que el test cambia."""
+
+    def __init__(self):
+        self.estado = dict(ESTADO)
+
+    def __call__(self, request):
+        return dict(self.estado)
+
+
+def _esperar(condicion, plazo=3.0):
+    limite = time.monotonic() + plazo
+    while time.monotonic() < limite:
+        if condicion():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def _publicador_vivo() -> bool:
+    return any(hilo.name == "control-publisher" for hilo in threading.enumerate())
+
+
+@pytest.fixture
+def rapido(monkeypatch):
+    monkeypatch.setattr(control, "PUBLISH_INTERVAL", 0.02)
+
+
+def test_un_cambio_llega_a_dos_suscriptores(servidor, rapido):
+    handler = EstadoMutable()
+    servidor(handler)
+    with _suscribir(control.socket_path()) as uno, _suscribir(control.socket_path()) as dos:
+        _linea(uno), _linea(dos)
+        handler.estado["paused"] = True
+        assert _linea(uno) == {**handler.estado, "event": "status"}
+        assert _linea(dos) == {**handler.estado, "event": "status"}
+
+
+def test_sin_cambios_no_se_envia_nada(servidor, rapido):
+    servidor(EstadoMutable())
+    with _suscribir(control.socket_path()) as sock:
+        _linea(sock)
+        sock.settimeout(0.3)
+        with pytest.raises(TimeoutError):
+            sock.recv(1)
+
+
+def test_suscriptor_cerrado_se_descarta_y_el_hilo_termina(servidor, rapido):
+    server = servidor(EstadoMutable())
+    sock = _suscribir(control.socket_path())
+    _linea(sock)
+    assert _publicador_vivo()
+    sock.close()
+    assert _esperar(lambda: not server._subscribers)
+    assert _esperar(lambda: not _publicador_vivo())
+
+
+def test_excepcion_en_status_no_mata_el_publicador(servidor, rapido):
+    handler = EstadoMutable()
+    fallos = []
+
+    def fragil(request):
+        if fallos:
+            raise RuntimeError("boom")
+        return handler(request)
+
+    servidor(fragil)
+    with _suscribir(control.socket_path()) as sock:
+        _linea(sock)
+        fallos.append(1)
+        time.sleep(0.1)
+        fallos.clear()
+        handler.estado["state"] = "recording"
+        assert _linea(sock)["state"] == "recording"
