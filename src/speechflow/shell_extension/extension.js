@@ -49,7 +49,11 @@ class Indicator extends PanelMenu.Button {
         this._actions = actions;
         this._alive = true;
         this._devicesRequest = 0;
+        this._devicesKey = null;
+        this._deviceItems = new Map();
+        this._selectedDevice = null;
         this._css = null;
+        this._status = null;
         this._icon = new St.Icon({
             icon_name: ICON_NORMAL,
             style_class: 'system-status-icon',
@@ -78,6 +82,7 @@ class Indicator extends PanelMenu.Button {
         this.menu.addMenuItem(this._languageMenu);
 
         this._deviceMenu = new PopupMenu.PopupSubMenuMenuItem('Micrófono');
+        this._setDevicePlaceholder();
         this._deviceMenu.menu.connect('open-state-changed', (menu, open) => {
             if (open)
                 this._refreshDevices();
@@ -105,31 +110,41 @@ class Indicator extends PanelMenu.Button {
         this._configItem.setSensitive(exists);
     }
 
-    _setDeviceMessage(text) {
-        this._deviceMenu.menu.removeAll();
-        this._deviceMenu.menu.addMenuItem(new PopupMenu.PopupMenuItem(text, {reactive: false}));
+    _setDevicePlaceholder() {
+        this._deviceMenu.menu.addMenuItem(new PopupMenu.PopupMenuItem('Cargando…', {reactive: false}));
     }
 
-    /** Pide `devices` al abrir el submenú; una respuesta tardía de una apertura anterior se descarta. */
+    /**
+     * Pide `devices` y reconstruye el submenú solo si la lista cambió, para que el submenú
+     * ya esté poblado (como el de idioma) cuando se abre; una respuesta tardía se descarta.
+     */
     async _refreshDevices() {
         const request = ++this._devicesRequest;
-        this._setDeviceMessage('Cargando…');
         const devices = await this._onDevices();
-        if (!this._alive || request !== this._devicesRequest)
+        if (!this._alive || request !== this._devicesRequest || devices === null)
             return;
-        if (devices === null) {
-            this._setDeviceMessage('No disponible');
-            return;
+        const key = JSON.stringify(devices.map(device => [device.index, device.name]));
+        if (key !== this._devicesKey) {
+            this._devicesKey = key;
+            this._deviceMenu.menu.removeAll();
+            this._deviceItems = new Map();
+            for (const device of devices) {
+                const item = new PopupMenu.PopupMenuItem(`[${device.index}] ${device.name}`);
+                item.connect('activate', () => this._onCommand({cmd: 'device', value: device.index}));
+                this._deviceMenu.menu.addMenuItem(item);
+                this._deviceItems.set(device.index, item);
+            }
+            if (devices.length === 0) {
+                this._deviceMenu.menu.addMenuItem(new PopupMenu.PopupMenuItem('Sin dispositivos de entrada', {reactive: false}));
+            }
         }
-        this._deviceMenu.menu.removeAll();
-        if (devices.length === 0)
-            this._setDeviceMessage('Sin dispositivos de entrada');
-        for (const device of devices) {
-            const item = new PopupMenu.PopupMenuItem(`[${device.index}] ${device.name}`);
-            item.setOrnament(device.selected ? PopupMenu.Ornament.DOT : PopupMenu.Ornament.NONE);
-            item.connect('activate', () => this._onCommand({cmd: 'device', value: device.index}));
-            this._deviceMenu.menu.addMenuItem(item);
-        }
+        this._selectedDevice = devices.find(device => device.selected)?.index ?? null;
+        this._markDevice();
+    }
+
+    _markDevice() {
+        for (const [index, item] of this._deviceItems)
+            item.setOrnament(index === this._selectedDevice ? PopupMenu.Ornament.DOT : PopupMenu.Ornament.NONE);
     }
 
     destroy() {
@@ -145,6 +160,15 @@ class Indicator extends PanelMenu.Button {
         this._css = view.css;
         if (this._css)
             this._icon.add_style_class_name(this._css);
+
+        const wasOffline = this._status === null;
+        const previousDevice = this._status?.device?.index;
+        this._status = status;
+        if (status !== null && (wasOffline || previousDevice !== status.device?.index)) {
+            this._selectedDevice = status.device?.index ?? null;
+            this._markDevice();
+            this._refreshDevices();
+        }
 
         this._paused = Boolean(status?.paused);
         this._statusItem.label.text = view.text;
