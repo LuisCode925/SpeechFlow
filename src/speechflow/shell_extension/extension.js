@@ -10,6 +10,8 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 Gio._promisify(Gio.SocketClient.prototype, 'connect_async', 'connect_finish');
 Gio._promisify(Gio.OutputStream.prototype, 'write_all_async', 'write_all_finish');
+Gio._promisify(Gio.Subprocess.prototype, 'communicate_utf8_async', 'communicate_utf8_finish');
+Gio._promisify(Gio.File.prototype, 'query_info_async', 'query_info_finish');
 Gio._promisify(Gio.DataInputStream.prototype, 'read_line_async', 'read_line_finish_utf8');
 
 const RETRY_SECONDS = 3;
@@ -44,10 +46,11 @@ function isCancelled(error) {
 
 const Indicator = GObject.registerClass(
 class Indicator extends PanelMenu.Button {
-    _init(onCommand, onDevices) {
+    _init(onCommand, onDevices, actions) {
         super._init(0.0, 'SpeechFlow');
         this._onCommand = onCommand;
         this._onDevices = onDevices;
+        this._actions = actions;
         this._devicesRequest = 0;
         this._css = null;
         this._icon = new St.Icon({
@@ -60,8 +63,11 @@ class Indicator extends PanelMenu.Button {
         this._detailItem = new PopupMenu.PopupMenuItem('', {reactive: false});
         this._pauseItem = new PopupMenu.PopupMenuItem('');
         this._pauseItem.connect('activate', () => this._onCommand({cmd: this._paused ? 'resume' : 'pause'}));
+        this._startItem = new PopupMenu.PopupMenuItem('Iniciar servicio');
+        this._startItem.connect('activate', () => this._actions.startService());
         this.menu.addMenuItem(this._statusItem);
         this.menu.addMenuItem(this._detailItem);
+        this.menu.addMenuItem(this._startItem);
         this.menu.addMenuItem(this._pauseItem);
 
         this._languageMenu = new PopupMenu.PopupSubMenuMenuItem('Idioma');
@@ -80,6 +86,24 @@ class Indicator extends PanelMenu.Button {
                 this._refreshDevices();
         });
         this.menu.addMenuItem(this._deviceMenu);
+
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        this._configItem = new PopupMenu.PopupMenuItem('Abrir configuración');
+        this._configItem.connect('activate', () => this._actions.openConfig());
+        this.menu.addMenuItem(this._configItem);
+        const historyItem = new PopupMenu.PopupMenuItem('Abrir carpeta del historial');
+        historyItem.connect('activate', () => this._actions.openHistory());
+        this.menu.addMenuItem(historyItem);
+        this.menu.connect('open-state-changed', (menu, open) => {
+            if (open)
+                this._refreshConfigItem();
+        });
+    }
+
+    /** `Abrir configuración` solo está activo si `config.toml` existe. */
+    async _refreshConfigItem() {
+        const exists = await this._actions.configExists();
+        this._configItem.setSensitive(exists);
     }
 
     _setDeviceMessage(text) {
@@ -123,6 +147,7 @@ class Indicator extends PanelMenu.Button {
         this._detailItem.visible = status !== null;
         if (status !== null)
             this._detailItem.label.text = `${status.model?.name ?? '?'} · ${status.model?.compute_device ?? '?'} · ${status.model?.status ?? '?'}`;
+        this._startItem.visible = status === null;
         this._pauseItem.visible = status !== null;
         this._pauseItem.label.text = this._paused ? 'Reanudar dictado' : 'Pausar dictado';
         this._languageMenu.visible = status !== null;
@@ -139,7 +164,12 @@ export default class SpeechFlowExtension extends Extension {
         this._connection = null;
         this._status = null;
         this._pending = new Set();
-        this._indicator = new Indicator(request => this._runCommand(request), () => this._fetchDevices());
+        this._indicator = new Indicator(request => this._runCommand(request), () => this._fetchDevices(), {
+            startService: () => this._startService(),
+            openConfig: () => this._open(this._configPath()),
+            openHistory: () => this._open(this._historyDir()),
+            configExists: () => this._configExists(),
+        });
         this._indicator.setStatus(null);
         Main.panel.addToStatusArea(this.uuid, this._indicator);
         this._connect();
@@ -159,6 +189,51 @@ export default class SpeechFlowExtension extends Extension {
         this._indicator?.destroy();
         this._indicator = null;
         this._status = null;
+    }
+
+    _configPath() {
+        return GLib.build_filenamev([GLib.get_user_config_dir(), 'speechflow', 'config.toml']);
+    }
+
+    _historyDir() {
+        return GLib.build_filenamev([GLib.get_user_state_dir(), 'speechflow']);
+    }
+
+    async _configExists() {
+        try {
+            await Gio.File.new_for_path(this._configPath()).query_info_async('standard::name', Gio.FileQueryInfoFlags.NONE, GLib.PRIORITY_DEFAULT, this._cancellable);
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    /** Abre un archivo o carpeta con la aplicación por defecto. */
+    _open(path) {
+        try {
+            Gio.AppInfo.launch_default_for_uri(Gio.File.new_for_path(path).get_uri(), null);
+        } catch (error) {
+            Main.notify('SpeechFlow', `No se pudo abrir ${path}: ${error.message}`);
+        }
+    }
+
+    /** `systemctl --user start speechflow`; si falla, muestra su salida de error. */
+    async _startService() {
+        try {
+            const process = new Gio.Subprocess({
+                argv: ['systemctl', '--user', 'start', 'speechflow'],
+                flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE,
+            });
+            process.init(this._cancellable);
+            const [stdout, stderr] = await process.communicate_utf8_async(null, this._cancellable);
+            if (!process.get_successful()) {
+                const detail = (stderr || stdout || '').trim() || `código ${process.get_exit_status()}`;
+                Main.notify('SpeechFlow', `No se pudo iniciar el servicio: ${detail}`);
+            }
+        } catch (error) {
+            if (this._cancellable)
+                Main.notify('SpeechFlow', `No se pudo iniciar el servicio: ${error.message}`);
+        }
     }
 
     _socketPath() {
