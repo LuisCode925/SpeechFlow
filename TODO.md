@@ -6,7 +6,7 @@ Ideas recogidas de la sección "Lo que **no** está en esta spec" de las SPEC 01
 
 - [ ] Streaming de la captura y de la transcripción (SPEC 03, 04, 05).
 - [ ] Reducción de ruido (SPEC 03).
-- [ ] Cambio de dispositivo por otros medios: stdin, señales, bandeja o menú gráfico (SPEC 08). Cubierto por el socket (SPEC 29, `speechflow ctl device`); quedan señales, bandeja y menú gráfico.
+- [ ] Cambio de dispositivo por otros medios: stdin, señales, ~~bandeja o menú gráfico~~ (SPEC 08). Cubierto por el socket (SPEC 29, `speechflow ctl device`) y por el submenú `Micrófono` de la extensión de GNOME Shell (SPEC 31); quedan stdin y señales.
 - [ ] Retroceder en la rotación, ~~elegir por índice o por nombre en caliente~~ (SPEC 29, `ctl device`), y listas de rotación configurables (SPEC 08).
 - [ ] Cambio automático al conectar, desconectar o fallar un dispositivo (SPEC 08).
 - [ ] Diferir el cambio de dispositivo hasta que el estado sea `IDLE` (SPEC 08).
@@ -25,7 +25,7 @@ Ideas recogidas de la sección "Lo que **no** está en esta spec" de las SPEC 01
 
 ## Ejecución en segundo plano
 
-- [ ] Bandeja del sistema (SPEC 01, 03, 04, 05).
+- [x] Bandeja del sistema (SPEC 01, 03, 04, 05). Cubierto en GNOME 48 por la extensión de la SPEC 31. Quedan otros escritorios (KDE, XFCE, Cinnamon, con StatusNotifierItem), Quick Settings y otras versiones del Shell.
 - [x] Eventos y suscripciones del canal de control (SPEC 29). Cubierto por `subscribe` y `speechflow ctl watch` (SPEC 30). Quedan eventos tipados o diferenciales, suscripciones filtradas por campo, texto transcrito o niveles de audio por la suscripción y latido.
 - [ ] Acelerar el arranque de `speechflow ctl` (SPEC 29). Hoy tarda ~0,75 s (`import speechflow.control` solo tarda ~30 ms) porque `main()` está en `app.py`, cuyo import (~0,67 s) ocurre antes de delegar. Reparto del import: `speechflow.audio` ~480 ms (arrastra `scipy.signal`), `speechflow.config` → `transcriber` → `faster_whisper` ~120 ms, más `sounddevice` y `pynput`. Opciones, de menos a más cambio:
   - Despachar `ctl` antes de importar `app`: módulo ligero (`speechflow/cli.py` o `__main__.py`) que mira `sys.argv` e importa `app` solo si no es `ctl`, y entry point de `pyproject.toml` apuntando a él. Deja `ctl` en ~50 ms sin tocar `audio.py` ni `transcriber.py`. Opción recomendada.

@@ -502,6 +502,47 @@ Con el servicio activo, cada orden queda en el log: `journalctl --user -u speech
 
 - **Arranque de `ctl`:** hoy `speechflow ctl` tarda ~0,75 s porque el comando carga `app.py` completo (`sounddevice`, `pynput`, `faster_whisper`) antes de delegar; el módulo `speechflow.control` en sí no importa nada de eso.
 
+## Icono en GNOME Shell
+
+Una extensión de GNOME Shell muestra en el panel superior el estado de `speechflow` y un menú para controlarlo. Habla con el socket del [canal de control](#canal-de-control) desde el propio Shell: no necesita PyGObject, conda ni la extensión AppIndicator.
+
+**Requisitos:** GNOME Shell **48** (solo esa versión; en otra el Shell la marca como incompatible) y el proceso `speechflow` en marcha, normalmente como [servicio de usuario](#servicio-de-usuario). Si la unidad no está instalada, `Iniciar servicio` falla: ejecuta antes `speechflow service install`.
+
+```bash
+speechflow ext install                     # copia la extensión a ~/.local/share/gnome-shell/extensions/speechflow@local/
+# reinicia el Shell: en X11, Alt+F2, escribe r y Enter; en Wayland, cierra la sesión y vuelve a entrar
+gnome-extensions enable speechflow@local   # actívala
+speechflow ext status                      # instalada, si coincide con la del paquete y gnome-extensions info
+speechflow ext uninstall                   # la desactiva y borra el directorio
+```
+
+`install` no activa la extensión (el Shell no ve las nuevas hasta reiniciarse), reemplaza la versión anterior y es idempotente; `uninstall` también. Respeta `XDG_DATA_HOME`. Tras actualizar `speechflow`, vuelve a ejecutar `ext install` y reinicia el Shell.
+
+### Estados del icono
+
+El primero que se cumpla:
+
+| Estado | Icono | Color | Texto |
+| --- | --- | --- | --- |
+| Sin conexión con el proceso | micrófono | atenuado | `SpeechFlow no está en ejecución` |
+| En pausa | micrófono tachado | normal | `En pausa` |
+| Grabando | micrófono | rojo | `Grabando` |
+| Transcribiendo | micrófono | amarillo | `Transcribiendo` |
+| Cargando el modelo | micrófono | azul | `Cargando el modelo…` |
+| Micrófono desconectado | micrófono | naranja | `Micrófono desconectado` |
+| Resto | micrófono | normal | `Listo` |
+
+### Menú
+
+- Línea de estado y de detalle (`<modelo> · <dispositivo de cómputo> · <estado del modelo>`).
+- `Pausar dictado` / `Reanudar dictado`.
+- Submenú `Idioma` (`Español`, `Inglés`, `Automático`) con el actual marcado.
+- Submenú `Micrófono`: pide la lista al abrirse (`[índice] nombre`) y marca el seleccionado.
+- `Abrir configuración` (`config.toml`; desactivado si no existe) y `Abrir carpeta del historial` (`$XDG_STATE_HOME/speechflow`).
+- Sin conexión solo quedan el estado, `Iniciar servicio` (`systemctl --user start speechflow`) y los dos elementos de abrir.
+
+Los errores del servidor (por ejemplo `ocupado: grabando` al cambiar de idioma mientras se graba) se muestran como notificación. La extensión se suscribe con `subscribe`, así que el icono cambia al instante y no hay sondeo; sin conexión reintenta cada 3 s. Si algo falla, mira `journalctl --user -b _COMM=gnome-shell | grep -i speechflow`.
+
 ## Configuración
 
 La app de push-to-talk lee un archivo TOML opcional (solo ella; `capture_mic.py`, `benchmark_stt.py` y `--list-devices` no lo usan). Se usa el primero que exista, sin fusionar:

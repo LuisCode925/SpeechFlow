@@ -40,10 +40,6 @@ function describe(status) {
     return {icon: ICON_NORMAL, css: null, text: 'Listo'};
 }
 
-function isCancelled(error) {
-    return error instanceof GLib.Error && error.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED);
-}
-
 const Indicator = GObject.registerClass(
 class Indicator extends PanelMenu.Button {
     _init(onCommand, onDevices, actions) {
@@ -51,6 +47,7 @@ class Indicator extends PanelMenu.Button {
         this._onCommand = onCommand;
         this._onDevices = onDevices;
         this._actions = actions;
+        this._alive = true;
         this._devicesRequest = 0;
         this._css = null;
         this._icon = new St.Icon({
@@ -103,6 +100,8 @@ class Indicator extends PanelMenu.Button {
     /** `Abrir configuración` solo está activo si `config.toml` existe. */
     async _refreshConfigItem() {
         const exists = await this._actions.configExists();
+        if (!this._alive)
+            return;
         this._configItem.setSensitive(exists);
     }
 
@@ -116,7 +115,7 @@ class Indicator extends PanelMenu.Button {
         const request = ++this._devicesRequest;
         this._setDeviceMessage('Cargando…');
         const devices = await this._onDevices();
-        if (request !== this._devicesRequest)
+        if (!this._alive || request !== this._devicesRequest)
             return;
         if (devices === null) {
             this._setDeviceMessage('No disponible');
@@ -131,6 +130,11 @@ class Indicator extends PanelMenu.Button {
             item.connect('activate', () => this._onCommand({cmd: 'device', value: device.index}));
             this._deviceMenu.menu.addMenuItem(item);
         }
+    }
+
+    destroy() {
+        this._alive = false;
+        super.destroy();
     }
 
     setStatus(status) {
@@ -219,19 +223,20 @@ export default class SpeechFlowExtension extends Extension {
 
     /** `systemctl --user start speechflow`; si falla, muestra su salida de error. */
     async _startService() {
+        const cancellable = this._cancellable;
         try {
             const process = new Gio.Subprocess({
                 argv: ['systemctl', '--user', 'start', 'speechflow'],
                 flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE,
             });
-            process.init(this._cancellable);
-            const [stdout, stderr] = await process.communicate_utf8_async(null, this._cancellable);
+            process.init(cancellable);
+            const [stdout, stderr] = await process.communicate_utf8_async(null, cancellable);
             if (!process.get_successful()) {
                 const detail = (stderr || stdout || '').trim() || `código ${process.get_exit_status()}`;
                 Main.notify('SpeechFlow', `No se pudo iniciar el servicio: ${detail}`);
             }
         } catch (error) {
-            if (this._cancellable)
+            if (!cancellable.is_cancelled())
                 Main.notify('SpeechFlow', `No se pudo iniciar el servicio: ${error.message}`);
         }
     }
@@ -278,12 +283,13 @@ export default class SpeechFlowExtension extends Extension {
 
     /** Ejecuta un comando desde el menú y avisa con `Main.notify` si falla. */
     async _runCommand(request) {
+        const cancellable = this._cancellable;
         try {
             const response = await this._command(request);
             if (!response.ok)
                 Main.notify('SpeechFlow', response.error ?? 'error desconocido');
         } catch (error) {
-            if (!this._cancellable)  // deshabilitada mientras esperaba
+            if (cancellable.is_cancelled())  // deshabilitada mientras esperaba
                 return;
             Main.notify('SpeechFlow', `No se pudo enviar el comando: ${error.message}`);
         }
@@ -291,13 +297,14 @@ export default class SpeechFlowExtension extends Extension {
 
     /** Lista de dispositivos de `devices`, o null si no se pudo obtener (se avisa con `Main.notify`). */
     async _fetchDevices() {
+        const cancellable = this._cancellable;
         try {
             const response = await this._command({cmd: 'devices'});
             if (response.ok)
                 return response.devices ?? [];
             Main.notify('SpeechFlow', response.error ?? 'error desconocido');
         } catch (error) {
-            if (this._cancellable)
+            if (!cancellable.is_cancelled())
                 Main.notify('SpeechFlow', `No se pudo obtener los micrófonos: ${error.message}`);
         }
         return null;
@@ -312,8 +319,12 @@ export default class SpeechFlowExtension extends Extension {
             try {
                 connection = source.connect_finish(result);
             } catch (error) {
-                if (!isCancelled(error))
+                if (!cancellable.is_cancelled())
                     this._lostConnection();
+                return;
+            }
+            if (cancellable.is_cancelled()) {  // deshabilitada mientras conectaba
+                connection.close_async(GLib.PRIORITY_DEFAULT, null, () => {});
                 return;
             }
             this._connection = connection;
@@ -327,10 +338,12 @@ export default class SpeechFlowExtension extends Extension {
             try {
                 stream.write_all_finish(result);
             } catch (error) {
-                if (!isCancelled(error))
+                if (!cancellable.is_cancelled())
                     this._lostConnection();
                 return;
             }
+            if (cancellable.is_cancelled())
+                return;
             const input = new Gio.DataInputStream({base_stream: connection.get_input_stream()});
             this._readLine(connection, input, cancellable);
         });
@@ -342,10 +355,12 @@ export default class SpeechFlowExtension extends Extension {
             try {
                 [line] = stream.read_line_finish_utf8(result);
             } catch (error) {
-                if (!isCancelled(error))
+                if (!cancellable.is_cancelled())
                     this._lostConnection();
                 return;
             }
+            if (cancellable.is_cancelled())
+                return;
             if (line === null) {  // EOF: el servicio se cerró
                 this._lostConnection();
                 return;
