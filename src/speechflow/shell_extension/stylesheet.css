@@ -1,0 +1,5 @@
+.speechflow-offline { color: rgba(255, 255, 255, 0.35); }
+.speechflow-recording { color: #ff3b30; }
+.speechflow-transcribing { color: #f6d32d; }
+.speechflow-loading { color: #62a0ea; }
+.speechflow-warning { color: #ff7800; }
