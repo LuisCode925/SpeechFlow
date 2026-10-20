@@ -14,6 +14,7 @@ Gio._promisify(Gio.DataInputStream.prototype, 'read_line_async', 'read_line_fini
 
 const RETRY_SECONDS = 3;
 const COMMAND_TIMEOUT_SECONDS = 10;
+const LANGUAGES = [['es', 'Español'], ['en', 'Inglés'], ['auto', 'Automático']];
 const ICON_NORMAL = 'audio-input-microphone-symbolic';
 const ICON_PAUSED = 'microphone-disabled-symbolic';
 
@@ -60,6 +61,16 @@ class Indicator extends PanelMenu.Button {
         this.menu.addMenuItem(this._statusItem);
         this.menu.addMenuItem(this._detailItem);
         this.menu.addMenuItem(this._pauseItem);
+
+        this._languageMenu = new PopupMenu.PopupSubMenuMenuItem('Idioma');
+        this._languageItems = new Map();
+        for (const [code, name] of LANGUAGES) {
+            const item = new PopupMenu.PopupMenuItem(name);
+            item.connect('activate', () => this._onCommand({cmd: 'language', value: code}));
+            this._languageMenu.menu.addMenuItem(item);
+            this._languageItems.set(code, item);
+        }
+        this.menu.addMenuItem(this._languageMenu);
     }
 
     setStatus(status) {
@@ -78,6 +89,9 @@ class Indicator extends PanelMenu.Button {
             this._detailItem.label.text = `${status.model?.name ?? '?'} · ${status.model?.compute_device ?? '?'} · ${status.model?.status ?? '?'}`;
         this._pauseItem.visible = status !== null;
         this._pauseItem.label.text = this._paused ? 'Reanudar dictado' : 'Pausar dictado';
+        this._languageMenu.visible = status !== null;
+        for (const [code, item] of this._languageItems)
+            item.setOrnament(status?.language === code ? PopupMenu.Ornament.DOT : PopupMenu.Ornament.NONE);
     }
 });
 
