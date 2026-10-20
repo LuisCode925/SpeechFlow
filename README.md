@@ -384,6 +384,7 @@ El proceso en marcha escucha en un socket Unix y `speechflow ctl` lo consulta y 
 
 ```bash
 speechflow ctl status              # estado, modelo, idioma, modo y micrófono
+speechflow ctl watch               # estado al conectar y en cada cambio (Ctrl+C para salir)
 speechflow ctl pause               # pausa el dictado y libera el modelo (VRAM)
 speechflow ctl resume              # reanuda y recarga el modelo en segundo plano
 speechflow ctl language en         # es, en o auto
@@ -411,18 +412,58 @@ PID:      122334
 - **Siempre activo:** no hay clave en el TOML. Si no se puede crear el socket (sin `XDG_RUNTIME_DIR`, ruta de más de 108 bytes) o ya hay otra instancia escuchando, el arranque registra un `WARNING` (`Canal de control desactivado: …`) y el dictado sigue sin canal. Nunca se borra el socket de una instancia viva; uno huérfano (tras `kill -9`) se reemplaza al arrancar.
 - **Seguridad:** el socket está en `$XDG_RUNTIME_DIR/speechflow/control.sock` (normalmente `/run/user/<uid>/speechflow/control.sock`), con el directorio en `0700` y el socket en `0600`. No hay más autenticación que esos permisos.
 
+### Suscripción a cambios de estado
+
+`speechflow ctl watch` se suscribe y imprime el resumen de `status` al conectar y cada vez que el estado cambia (grabando, transcribiendo, pausa, carga del modelo, idioma, micrófono...), con una línea en blanco entre entradas. Termina con `Ctrl+C`. Con `--json` imprime las líneas crudas, una por cambio.
+
+```text
+$ speechflow ctl watch
+Estado:   idle
+Pausa:    no
+Modelo:   medium [loaded, cuda]
+Idioma:   es
+Modo:     hold
+Micrófono: [4] HD-Audio Generic: ALC1220 Analog (hw:1,0)
+PID:      36079
+
+Estado:   recording
+Pausa:    no
+Modelo:   medium [loaded, cuda]
+Idioma:   es
+Modo:     hold
+Micrófono: [4] HD-Audio Generic: ALC1220 Analog (hw:1,0)
+PID:      36079
+^C
+```
+
+A mano, sin `speechflow ctl`, la conexión se queda abierta y llega una línea por cambio:
+
+```bash
+printf '{"cmd":"subscribe"}\n' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/speechflow/control.sock
+```
+
+```json
+{"ok": true, "pid": 36079, "state": "idle", "paused": false, "model": {"name": "medium", "status": "unloaded", "compute_device": "cuda"}, "language": "es", "mode": "hold", "device": {"index": 4, "name": "HD-Audio Generic: ALC1220 Analog (hw:1,0)", "connected": true}, "event": "status"}
+```
+
+- **Formato:** cada línea es la respuesta de `status` más `"event": "status"`, en UTF-8 y terminada en `\n`. Siempre es la foto completa, así que el cliente no reconstruye nada. Los clientes ignoran los campos desconocidos.
+- **Latencia:** el servidor toma una muestra de `status` cada 0,25 s mientras haya suscriptores y envía solo lo que cambió, así que un cambio llega con hasta 0,25 s de retraso. Sin suscriptores no hay hilo ni coste. Un cambio breve entre dos muestras puede no verse.
+- **Límites:** hasta 8 suscriptores a la vez; el siguiente recibe `{"ok": false, "error": "demasiados suscriptores"}` y se cierra. Un suscriptor que no lee, o que cierra su extremo, se descarta (1 s máximo para escribirle).
+- **Cierre:** al detener el proceso (`SIGTERM`, `Ctrl+C`, `systemctl --user stop speechflow`) el servidor cierra las suscripciones y el cliente recibe EOF. Los comandos (`pause`, `language`...) van por conexiones aparte, no por la de la suscripción.
+- **Salida de `ctl watch`:** 0 con `Ctrl+C`, 3 si no hay proceso escuchando y 1 si el servidor se detiene (`SpeechFlow cerró la conexión.`) o responde `ok: false`.
+
 ### Códigos de salida de `ctl`
 
 | Código | Significado |
 | --- | --- |
-| 0 | El servidor respondió `ok: true` |
-| 1 | El servidor respondió `ok: false` (el mensaje va a stderr) |
+| 0 | El servidor respondió `ok: true` (en `watch`, `Ctrl+C`) |
+| 1 | El servidor respondió `ok: false` (el mensaje va a stderr); en `watch`, también si el servidor cierra la conexión |
 | 2 | Uso incorrecto: sin comando, comando desconocido o falta el argumento (se muestra la ayuda) |
 | 3 | No hay proceso escuchando: `SpeechFlow no está en ejecución: no hay socket en <ruta>.` |
 
 ### Protocolo JSON
 
-Una petición por conexión, un objeto JSON en una línea terminada en `\n` (UTF-8, máximo 4096 bytes; el servidor espera la línea hasta 2 s). El servidor responde con otra línea JSON y cierra. Los campos desconocidos se ignoran en ambos sentidos.
+Una petición por conexión, un objeto JSON en una línea terminada en `\n` (UTF-8, máximo 4096 bytes; el servidor espera la línea hasta 2 s). El servidor responde con otra línea JSON y cierra (salvo `subscribe`, que mantiene la conexión: ver [Suscripción a cambios de estado](#suscripción-a-cambios-de-estado)). Los campos desconocidos se ignoran en ambos sentidos.
 
 ```json
 {"cmd": "status"}
@@ -430,7 +471,7 @@ Una petición por conexión, un objeto JSON en una línea terminada en `\n` (UTF
 {"cmd": "device", "value": "next"}
 ```
 
-`cmd` es `status`, `pause`, `resume`, `language` (`value`: `es`, `en` o `auto`), `device` (`value`: `next`, un índice entero o un nombre) o `devices`. Las respuestas correctas llevan `"ok": true`; las de error, `"ok": false` y `"error"` en español:
+`cmd` es `status`, `subscribe`, `pause`, `resume`, `language` (`value`: `es`, `en` o `auto`), `device` (`value`: `next`, un índice entero o un nombre) o `devices`. Las respuestas correctas llevan `"ok": true`; las de error, `"ok": false` y `"error"` en español:
 
 ```json
 {"ok": true, "pid": 122334, "state": "idle", "paused": false, "model": {"name": "medium", "status": "loaded", "compute_device": "cuda"}, "language": "es", "mode": "hold", "device": {"index": 9, "name": "Realtek Audio USB: Audio (hw:3,0)", "connected": true}}

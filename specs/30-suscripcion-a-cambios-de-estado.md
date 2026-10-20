@@ -1,6 +1,6 @@
 # SPEC 30 — Suscripción a cambios de estado en el canal de control
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** SPEC 29
 > **Fecha:** 2026-10-20
 > **Objetivo:** Añadir el comando `subscribe` al canal de control, que mantiene la conexión abierta y envía una línea JSON con el `status` completo al suscribirse y cada vez que cambia, más el subcomando `speechflow ctl watch` para verlo desde la terminal.
