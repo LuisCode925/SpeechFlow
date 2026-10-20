@@ -298,3 +298,55 @@ def test_ctl_uso_incorrecto_sale_con_2(peticiones, capsys):
 def test_ctl_help_sale_con_0(capsys):
     assert control.main(["--help"]) == 0
     assert "status" in capsys.readouterr().out
+
+
+# --- subscribe (SPEC 30) ---
+
+ESTADO = {"ok": True, "pid": 1, "state": "idle", "paused": False}
+
+
+def _suscribir(path) -> socket.socket:
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(5)
+    sock.connect(str(path))
+    sock.sendall(b'{"cmd": "subscribe"}\n')
+    return sock
+
+
+def _linea(sock) -> dict:
+    data = b""
+    while not data.endswith(b"\n"):
+        chunk = sock.recv(4096)
+        if not chunk:
+            break
+        data += chunk
+    return json.loads(data)
+
+
+def test_subscribe_responde_con_status_y_event(servidor):
+    peticiones = []
+    servidor(lambda request: peticiones.append(request) or dict(ESTADO))
+    with _suscribir(control.socket_path()) as sock:
+        assert _linea(sock) == {**ESTADO, "event": "status"}
+    assert peticiones == [{"cmd": "status"}]
+
+
+def test_subscribe_no_cierra_la_conexion_ni_bloquea_otras_peticiones(servidor):
+    server = servidor(lambda request: dict(ESTADO))
+    with _suscribir(control.socket_path()) as sock:
+        _linea(sock)
+        inicio = time.monotonic()
+        assert control.send_request({"cmd": "status"}) == ESTADO
+        assert time.monotonic() - inicio < 1
+        sock.settimeout(0.3)
+        with pytest.raises(TimeoutError):
+            sock.recv(1)  # sigue abierta: ni datos ni EOF
+        assert len(server._subscribers) == 1
+
+
+def test_subscribe_con_error_de_status_cierra_la_conexion(servidor):
+    server = servidor(lambda request: {"ok": False, "error": "no disponible"})
+    with _suscribir(control.socket_path()) as sock:
+        assert _linea(sock) == {"ok": False, "error": "no disponible"}
+        assert sock.recv(1) == b""
+    assert server._subscribers == []

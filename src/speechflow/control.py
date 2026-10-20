@@ -14,6 +14,7 @@ logger = logging.getLogger("speechflow")
 
 MAX_REQUEST_BYTES = 4096
 READ_TIMEOUT = 2.0
+SEND_TIMEOUT = 1.0         # s máximos para escribir a un suscriptor
 _ACCEPT_POLL = 0.2
 
 
@@ -60,6 +61,8 @@ class ControlServer:
         self._sock: socket.socket | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
+        self._subscribers: list[socket.socket] = []
+        self._subscribers_lock = threading.Lock()
 
     def start(self) -> None:
         """Crea el directorio (0700) y el socket (0600) y empieza a atender. OSError si no puede crearse."""
@@ -107,13 +110,17 @@ class ControlServer:
                 continue
             except OSError:
                 return
-            with conn:
-                try:
-                    self._handle_connection(conn)
-                except Exception:
-                    logger.debug("Error atendiendo una conexión de control", exc_info=True)
+            keep = False
+            try:
+                keep = self._handle_connection(conn)
+            except Exception:
+                logger.debug("Error atendiendo una conexión de control", exc_info=True)
+            finally:
+                if not keep:
+                    conn.close()
 
-    def _handle_connection(self, conn: socket.socket) -> None:
+    def _handle_connection(self, conn: socket.socket) -> bool:
+        """Atiende una petición. True si la conexión pasa a ser un suscriptor y no debe cerrarse."""
         conn.settimeout(READ_TIMEOUT)
         try:
             line = _read_line(conn, MAX_REQUEST_BYTES)
@@ -125,6 +132,8 @@ class ControlServer:
             response = {"ok": False, "error": f"petición inválida: {reason}"}
         else:
             logger.debug("Petición de control: %r", request)
+            if request.get("cmd") == "subscribe":
+                return self._subscribe(conn)
             try:
                 response = self._handler(request)
             except Exception:
@@ -134,6 +143,29 @@ class ControlServer:
             conn.sendall(_encode(response))
         except OSError:
             logger.debug("El cliente de control cerró antes de la respuesta")
+        return False
+
+    def _subscribe(self, conn: socket.socket) -> bool:
+        """Responde con la foto de `status` más `event` y guarda la conexión como suscriptor. False si se rechaza."""
+        try:
+            response = self._handler({"cmd": "status"})
+        except Exception:
+            logger.exception("Error en el manejador de control")
+            response = {"ok": False, "error": "error interno"}
+        subscribed = bool(response.get("ok"))
+        if subscribed:
+            response = {**response, "event": "status"}
+        try:
+            conn.settimeout(SEND_TIMEOUT)
+            conn.sendall(_encode(response))
+        except OSError:
+            logger.debug("El suscriptor cerró antes de la primera línea")
+            return False
+        if subscribed:
+            with self._subscribers_lock:
+                self._subscribers.append(conn)
+            logger.debug("Suscriptor de control añadido")
+        return subscribed
 
 
 def _is_alive(path: Path) -> bool:
